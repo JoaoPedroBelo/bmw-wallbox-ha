@@ -1,6 +1,4 @@
 """Test BMW Wallbox sensors."""
-import pytest
-
 from homeassistant.core import HomeAssistant
 
 from custom_components.bmw_wallbox.sensor import (

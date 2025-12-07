@@ -1,13 +1,10 @@
 """Test BMW Wallbox config flow."""
 from unittest.mock import patch
 
-import pytest
-
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.bmw_wallbox.config_flow import InvalidPort, InvalidSSLCert, InvalidSSLKey
 from custom_components.bmw_wallbox.const import DOMAIN
 
 

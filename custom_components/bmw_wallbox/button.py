@@ -11,9 +11,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import BUTTON_START, BUTTON_STOP, BUTTON_REBOOT, DOMAIN
+from .coordinator import BMWWallboxCoordinator
 
 BUTTON_REFRESH = "refresh_data"
-from .coordinator import BMWWallboxCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 

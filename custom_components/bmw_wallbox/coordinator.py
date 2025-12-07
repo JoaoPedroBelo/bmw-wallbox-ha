@@ -27,7 +27,6 @@ from ocpp.v201.datatypes import (
 )
 from ocpp.v201.enums import (
     AttributeEnumType,
-    AuthorizationStatusEnumType,
     ChargingProfileKindEnumType,
     ChargingProfilePurposeEnumType,
     ChargingRateUnitEnumType,
@@ -39,7 +38,7 @@ from ocpp.v201.enums import (
 )
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN, UPDATE_INTERVAL
 
@@ -110,7 +109,6 @@ class WallboxChargePoint(cp):
                 value = sample.get("value")
                 phase = sample.get("phase")
                 context = sample.get("context")
-                location = sample.get("location")
                 
                 _LOGGER.info("  📈 %s = %s (phase=%s, context=%s)", 
                             measurand, value, phase, context)
