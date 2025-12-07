@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2024-12-07
+
+### Added
+- Release process documentation (RELEASES.md)
+- Repository description and topics for better discoverability
+- HACS validation workflow for continuous integration
+
+### Fixed
+- Manifest.json key ordering to pass Hassfest validation
+- HACS.json now at repository root as required by HACS
+- Repository metadata for HACS compliance
+
+### Documentation
+- Comprehensive guide for creating new releases
+- Improved README with CI/CD badges
+- Better project structure and organization
+
+[1.0.1]: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/releases/tag/v1.0.1
+
 ## [1.0.0] - 2024-12-07
 
 ### Added
