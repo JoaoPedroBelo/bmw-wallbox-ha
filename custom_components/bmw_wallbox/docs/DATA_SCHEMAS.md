@@ -243,11 +243,11 @@ entry.data: dict[str, Any] = {
 
     "charge_point_id": str,     # Wallbox identifier
                                 # Required, no default
-                                # Example: "DE*BMW*EDAKG4234102578WE"
+                                # Example: "DE*BMW*ETEST1234567890AB"
                                 # Constant: CONF_CHARGE_POINT_ID
 
     "rfid_token": str,          # RFID token for authorization
-                                # Default: "04a125f2fc1194"
+                                # Optional, default: ""
                                 # Used in RequestStartTransaction
                                 # Constant: CONF_RFID_TOKEN
 
@@ -267,7 +267,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema({
     vol.Required(CONF_SSL_CERT, default="/ssl/fullchain.pem"): str,
     vol.Required(CONF_SSL_KEY, default="/ssl/privkey.pem"): str,
     vol.Required(CONF_CHARGE_POINT_ID): str,
-    vol.Optional(CONF_RFID_TOKEN, default="04a125f2fc1194"): str,
+    vol.Optional(CONF_RFID_TOKEN, default=""): str,
     vol.Optional(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): vol.All(
         vol.Coerce(int), vol.Range(min=6, max=32)
     ),

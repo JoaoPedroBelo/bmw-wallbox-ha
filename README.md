@@ -1,0 +1,161 @@
+# BMW Wallbox Home Assistant Integration
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Delta Electronics EIAW-E22KTSE6B04) using the OCPP 2.0.1 protocol.
+
+## ✨ Features
+
+- **🔌 Real-time Monitoring**: Track power, energy, current, voltage, and charging state
+- **🎮 Smart Control**: Start/stop charging, set current limits dynamically
+- **📊 37 Sensors**: Comprehensive data including per-phase measurements
+- **⚡ Energy Dashboard**: Full integration with Home Assistant's Energy Dashboard
+- **🔒 Secure**: Uses OCPP 2.0.1 with WebSocket Secure (WSS) connection
+- **🏠 Local Control**: No cloud required - runs entirely on your local network
+
+## 🚀 Quick Start
+
+### Installation via HACS
+
+1. Open HACS in your Home Assistant instance
+2. Click on "Integrations"
+3. Click the three dots in the top right corner and select "Custom repositories"
+4. Add this repository URL: `https://github.com/JoaoPedroBelo/bmw-wallbox-ha`
+5. Select category "Integration"
+6. Click "Add"
+7. Find "BMW Wallbox (OCPP)" in HACS and click "Install"
+8. Restart Home Assistant
+
+### Configuration
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **+ Add Integration**
+3. Search for "BMW Wallbox"
+4. Enter your configuration:
+   - **WebSocket Port**: Default is 9000
+   - **SSL Certificate Path**: Path to your SSL certificate (e.g., `/ssl/fullchain.pem`)
+   - **SSL Key Path**: Path to your SSL private key (e.g., `/ssl/privkey.pem`)
+   - **Charge Point ID**: Your wallbox's unique ID
+   - **RFID Token** (optional): Authorization token
+   - **Maximum Current**: Maximum allowed current (6-32A)
+
+### Configure Your Wallbox
+
+Update your BMW wallbox OCPP settings to point to your Home Assistant:
+- **OCPP URL**: `wss://your-home-assistant.local:9000`
+- **Protocol**: OCPP 2.0.1
+
+## 📖 Documentation
+
+Comprehensive documentation is available in the [`custom_components/bmw_wallbox`](custom_components/bmw_wallbox/) folder:
+
+- **[Main README](custom_components/bmw_wallbox/README.md)**: Full usage guide and examples
+- **[Architecture](custom_components/bmw_wallbox/docs/ARCHITECTURE.md)**: Technical architecture overview
+- **[OCPP Handlers](custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md)**: OCPP message handling details
+- **[Testing Guide](custom_components/bmw_wallbox/docs/TESTING.md)**: Development and testing information
+- **[Troubleshooting](custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md)**: Common issues and solutions
+
+## 🎯 Key Sensors
+
+### Core Sensors (Always Enabled)
+- Power (W), Energy Total (kWh), Energy Session (Wh)
+- Current (A), Voltage (V)
+- Charging State, Connector Status
+- Transaction ID, Event Type, Trigger Reason
+
+### Advanced Sensors (Disabled by Default)
+- Per-phase current and voltage (L1, L2, L3)
+- Power factor, frequency, temperature
+- Active/reactive power and energy measurements
+
+### Binary Sensors
+- Charging (ON when actively charging)
+- Connected (ON when wallbox is connected via OCPP)
+
+### Controls
+- Start/Stop Charging buttons
+- Charging switch
+- Current Limit slider (0-32A)
+
+## 🏗️ Example Automations
+
+### Solar-Powered Charging
+```yaml
+automation:
+  - alias: "Start charging with excess solar"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.solar_power
+        above: 5000
+    condition:
+      - condition: state
+        entity_id: binary_sensor.wallbox_charging
+        state: "off"
+    action:
+      - service: button.press
+        target:
+          entity_id: button.wallbox_start_charging
+```
+
+### Dynamic Current Limiting
+```yaml
+automation:
+  - alias: "Adjust current based on house load"
+    trigger:
+      - platform: state
+        entity_id: sensor.house_power
+    condition:
+      - condition: state
+        entity_id: binary_sensor.wallbox_charging
+        state: "on"
+    action:
+      - service: number.set_value
+        target:
+          entity_id: number.wallbox_current_limit
+        data:
+          value: >
+            {% set available = 32 - (states('sensor.house_power')|float / 230) %}
+            {{ [6, [available|round, 32]|min]|max }}
+```
+
+## 🔧 Supported Hardware
+
+- **Primary**: BMW-branded Delta Electronics wallboxes (Model: EIAW-E22KTSE6B04)
+- **Potential**: Any OCPP 2.0.1 compatible wallbox (untested)
+
+## 🛠️ Technical Details
+
+- **Protocol**: OCPP 2.0.1 with Security profile
+- **Architecture**: Acts as OCPP Central System (server)
+- **Connection**: WebSocket Secure (WSS)
+- **Integration Type**: Local Push (no polling required)
+- **Home Assistant**: Compatible with 2023.1.0+
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👤 Author
+
+**João Belo** ([@JoaoPedroBelo](https://github.com/JoaoPedroBelo))
+
+## ⚠️ Disclaimer
+
+This is an independent, open-source integration created for BMW-branded Delta Electronics wallboxes. This project is not affiliated with, endorsed by, or sponsored by BMW AG, BMW Group, Delta Electronics, or any related companies.
+
+## 🐛 Issues & Support
+
+For issues or questions:
+- [GitHub Issues](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues)
+- Review Home Assistant logs for error messages
+- Check the [Troubleshooting Guide](custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md)
+
+## ⭐ Show Your Support
+
+If you find this integration useful, please consider giving it a star on GitHub!
+

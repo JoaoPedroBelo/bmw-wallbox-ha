@@ -386,7 +386,7 @@ from ocpp.v201.datatypes import IdTokenType
 from ocpp.v201.enums import IdTokenEnumType, RequestStartStopStatusEnumType
 
 id_token = IdTokenType(
-    id_token=self.config.get("rfid_token", "04a125f2fc1194"),
+    id_token=self.config.get("rfid_token", "00000000000000"),
     type=IdTokenEnumType.local,
 )
 

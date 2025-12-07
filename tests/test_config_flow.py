@@ -31,7 +31,7 @@ async def test_user_input_valid(hass: HomeAssistant) -> None:
                 "ssl_cert": "/ssl/fullchain.pem",
                 "ssl_key": "/ssl/privkey.pem",
                 "charge_point_id": "DE*BMW*TEST123",
-                "rfid_token": "04a125f2fc1194",
+                "rfid_token": "00000000000000",
                 "max_current": 32,
             },
         )

@@ -29,8 +29,6 @@ Custom Home Assistant integration for BMW wallboxes (Delta Electronics EIAW-E22K
 - **Per-Phase Voltage**: L1, L2, L3 (for 3-phase installations)
 - **Other**: Frequency (Hz), Temperature (°C), State of Charge (%)
 
-📖 **[Full Sensor Documentation](../../SENSORS_DOCUMENTATION.md)** - Complete list and descriptions
-
 ### Binary Sensors
 - **Charging** - ON when actively charging
 - **Connected** - ON when wallbox is connected via OCPP
@@ -75,7 +73,7 @@ Custom Home Assistant integration for BMW wallboxes (Delta Electronics EIAW-E22K
    - **WebSocket Port**: Default is 9000
    - **SSL Certificate Path**: Path to your SSL certificate (e.g., `/ssl/fullchain.pem`)
    - **SSL Key Path**: Path to your SSL private key (e.g., `/ssl/privkey.pem`)
-   - **Charge Point ID**: Your wallbox's charge point ID (e.g., `DE*BMW*EDAKG4234102578WE`)
+   - **Charge Point ID**: Your wallbox's charge point ID (e.g., `DE*BMW*ETEST1234567890AB`)
    - **RFID Token** (optional): Token for RequestStartTransaction
    - **Maximum Current**: Maximum allowed current (6-32A)
 

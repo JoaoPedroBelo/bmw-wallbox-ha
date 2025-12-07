@@ -553,7 +553,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         _LOGGER.info("📤 No transaction - sending RequestStartTransaction...")
         try:
             id_token = IdTokenType(
-                id_token=self.config.get("rfid_token", "04a125f2fc1194"),
+                id_token=self.config.get("rfid_token", "00000000000000"),
                 type=IdTokenEnumType.local,
             )
             
