@@ -1,0 +1,223 @@
+---
+description: Rules for adding outgoing OCPP commands in coordinator
+globs:
+  - "**/coordinator.py"
+alwaysApply: false
+---
+
+# Rules: Adding an Outgoing OCPP Command
+
+## Documentation References
+
+**Read first:**
+- `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Section: "Template: Adding a New Outgoing Command"
+- `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Section: "Charging Control Methods"
+- `custom_components/bmw_wallbox/docs/PATTERNS.md` - Section: "Pattern: Sending OCPP Commands with Timeout"
+
+## Files to Modify
+
+1. `custom_components/bmw_wallbox/coordinator.py` - `BMWWallboxCoordinator` class
+
+## Command Pattern with Full Error Handling
+
+```python
+# coordinator.py - in BMWWallboxCoordinator class
+
+async def async_new_command(self, param: int) -> dict:
+    """Send new command to wallbox.
+    
+    Args:
+        param: Command parameter
+        
+    Returns:
+        dict with keys: success (bool), message (str), action (str)
+    """
+    result = {
+        "success": False,
+        "message": "",
+        "action": "failed",
+    }
+    
+    # ALWAYS check connection
+    if not self.charge_point:
+        result["message"] = "Wallbox not connected"
+        _LOGGER.error("Cannot execute: no wallbox connected")
+        return result
+    
+    # Check transaction if required for this command
+    if not self.current_transaction_id:
+        result["message"] = "No active charging session"
+        _LOGGER.error("Cannot execute: no transaction")
+        return result
+    
+    _LOGGER.info("Sending NewCommand with param=%s", param)
+    
+    try:
+        # ALWAYS use timeout (15 seconds)
+        response = await asyncio.wait_for(
+            self.charge_point.call(
+                call.NewCommand(
+                    param=param,
+                )
+            ),
+            timeout=15.0
+        )
+        
+        _LOGGER.debug("NewCommand response: %s", response.status)
+        
+        if response.status == "Accepted":
+            result["success"] = True
+            result["message"] = "Command accepted"
+            result["action"] = "completed"
+        else:
+            result["message"] = f"Rejected: {response.status}"
+            result["action"] = "rejected"
+        
+        return result
+        
+    except asyncio.TimeoutError:
+        result["message"] = "Command timed out - wallbox not responding"
+        _LOGGER.error("NewCommand timed out!")
+        return result
+    except Exception as err:
+        result["message"] = f"Error: {str(err)}"
+        _LOGGER.error("NewCommand failed: %s", err)
+        return result
+```
+
+## Common OCPP Commands
+
+### SetChargingProfile (Control Current)
+
+```python
+from ocpp.v201.datatypes import (
+    ChargingProfileType,
+    ChargingScheduleType,
+    ChargingSchedulePeriodType,
+)
+from ocpp.v201.enums import (
+    ChargingProfileKindEnumType,
+    ChargingProfilePurposeEnumType,
+    ChargingRateUnitEnumType,
+)
+
+# Create schedule
+schedule = ChargingScheduleType(
+    id=1,
+    start_schedule=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    charging_rate_unit=ChargingRateUnitEnumType.amps,
+    charging_schedule_period=[
+        ChargingSchedulePeriodType(start_period=0, limit=32.0)
+    ],
+)
+
+# Create profile - REQUIRES transaction_id
+profile = ChargingProfileType(
+    id=999,
+    stack_level=1,
+    charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
+    charging_profile_kind=ChargingProfileKindEnumType.absolute,
+    charging_schedule=[schedule],
+    transaction_id=self.current_transaction_id,  # REQUIRED!
+)
+
+response = await asyncio.wait_for(
+    self.charge_point.call(
+        call.SetChargingProfile(evse_id=1, charging_profile=profile)
+    ),
+    timeout=15.0
+)
+```
+
+### RequestStartTransaction
+
+```python
+from ocpp.v201.datatypes import IdTokenType
+from ocpp.v201.enums import IdTokenEnumType
+
+id_token = IdTokenType(
+    id_token=self.config.get("rfid_token", "04a125f2fc1194"),
+    type=IdTokenEnumType.local,
+)
+
+response = await asyncio.wait_for(
+    self.charge_point.call(
+        call.RequestStartTransaction(
+            id_token=id_token,
+            remote_start_id=int(datetime.utcnow().timestamp()),
+            evse_id=1,
+        )
+    ),
+    timeout=15.0
+)
+```
+
+### SetVariables (Configure Settings)
+
+```python
+from ocpp.v201.datatypes import (
+    SetVariableDataType,
+    ComponentType,
+    VariableType,
+)
+from ocpp.v201.enums import AttributeEnumType
+
+set_var = SetVariableDataType(
+    attribute_type=AttributeEnumType.actual,
+    attribute_value=str(value),  # Always string
+    component=ComponentType(name="ChargingStation"),
+    variable=VariableType(name="StatusLedBrightness"),
+)
+
+response = await asyncio.wait_for(
+    self.charge_point.call(
+        call.SetVariables(set_variable_data=[set_var])
+    ),
+    timeout=15.0
+)
+```
+
+### Reset (Reboot Wallbox)
+
+```python
+from ocpp.v201.enums import ResetEnumType
+
+response = await asyncio.wait_for(
+    self.charge_point.call(
+        call.Reset(type=ResetEnumType.immediate)
+    ),
+    timeout=15.0
+)
+```
+
+## Critical Rules for Commands
+
+1. **ALWAYS use timeout** - `asyncio.wait_for(..., timeout=15.0)`
+2. **Check self.charge_point exists** - Wallbox may be disconnected
+3. **Check transaction if required** - SetChargingProfile needs transaction_id
+4. **Return dict with success/message** - For user feedback
+5. **Handle all exceptions** - TimeoutError and general Exception
+6. **Log command execution** - Use _LOGGER.info() and _LOGGER.error()
+
+## Transaction Required Commands
+
+These commands REQUIRE an active transaction:
+- SetChargingProfile (with tx_profile purpose)
+
+Check before sending:
+```python
+if not self.current_transaction_id:
+    return {"success": False, "message": "No active transaction"}
+```
+
+## Checklist
+
+- [ ] Method added to `BMWWallboxCoordinator` class
+- [ ] Returns dict with `success`, `message`, `action` keys
+- [ ] Checks `self.charge_point` exists
+- [ ] Checks `self.current_transaction_id` if required
+- [ ] Uses `asyncio.wait_for()` with 15 second timeout
+- [ ] Handles `asyncio.TimeoutError` exception
+- [ ] Handles general `Exception`
+- [ ] Logs command execution and errors
+- [ ] Tested with actual wallbox

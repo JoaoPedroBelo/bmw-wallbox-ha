@@ -1,0 +1,149 @@
+---
+description: Rules for adding new sensors to the BMW Wallbox integration
+globs:
+  - "**/sensor.py"
+  - "**/const.py"
+  - "**/test_sensor.py"
+alwaysApply: false
+---
+
+# Rules: Adding a New Sensor
+
+## Documentation References
+
+**Read first:**
+- `custom_components/bmw_wallbox/docs/ENTITIES.md` - Section: "Template: Adding a New Sensor"
+- `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Section: "Coordinator Data Schema"
+- `custom_components/bmw_wallbox/docs/CONSTANTS.md` - Section: "Sensor Entity Suffixes"
+- `custom_components/bmw_wallbox/docs/TESTING.md` - Section: "Testing Sensors"
+
+## Files to Modify
+
+1. `custom_components/bmw_wallbox/const.py`
+2. `custom_components/bmw_wallbox/coordinator.py`
+3. `custom_components/bmw_wallbox/sensor.py`
+4. `tests/test_sensor.py`
+
+## Step-by-Step Guide
+
+### Step 1: Add Constant (const.py)
+
+```python
+# custom_components/bmw_wallbox/const.py
+SENSOR_NEW_METRIC: Final = "new_metric"
+```
+
+### Step 2: Add Data Field (coordinator.py)
+
+In `BMWWallboxCoordinator.__init__()`:
+
+```python
+self.data: dict[str, Any] = {
+    # ... existing fields ...
+    "new_metric": None,  # Default value
+}
+```
+
+### Step 3: Extract Value from OCPP (coordinator.py)
+
+In `WallboxChargePoint.on_transaction_event()`:
+
+```python
+# Inside meter_value processing loop
+elif measurand == "New.Metric.Name":
+    self.coordinator.data["new_metric"] = float(value)
+```
+
+### Step 4: Create Sensor Class (sensor.py)
+
+```python
+from .const import SENSOR_NEW_METRIC
+
+class BMWWallboxNewMetricSensor(BMWWallboxSensorBase):
+    """Sensor for new metric."""
+
+    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            SENSOR_NEW_METRIC,
+            "New Metric"  # Display name
+        )
+        # Set sensor attributes
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_native_unit_of_measurement = UnitOfPower.WATT
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:lightning-bolt"
+        self._attr_suggested_display_precision = 0
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the sensor value."""
+        return self.coordinator.data.get("new_metric")
+```
+
+### Step 5: Register Sensor (sensor.py)
+
+In `async_setup_entry()`:
+
+```python
+async_add_entities([
+    # ... existing sensors ...
+    BMWWallboxNewMetricSensor(coordinator, entry),
+])
+```
+
+### Step 6: Add Tests (tests/test_sensor.py)
+
+```python
+async def test_new_metric_sensor(hass, mock_coordinator, mock_config_entry):
+    """Test new metric sensor."""
+    mock_coordinator.data["new_metric"] = 1500.0
+    
+    sensor = BMWWallboxNewMetricSensor(mock_coordinator, mock_config_entry)
+    
+    assert sensor.native_value == 1500.0
+    assert sensor.native_unit_of_measurement == "W"
+    assert sensor.device_class == "power"
+```
+
+## Critical Rules for Sensors
+
+1. **Always extend `BMWWallboxSensorBase`**
+2. **Set unique_id via base class** - `super().__init__(coordinator, entry, SENSOR_*, "Name")`
+3. **Read from coordinator.data** - Never store state in sensor
+4. **Include device_class and unit** - For proper HA integration
+5. **Return None for missing values** - Don't return 0 or empty string
+
+## Device Classes & Units
+
+Common combinations:
+
+```python
+# Power
+self._attr_device_class = SensorDeviceClass.POWER
+self._attr_native_unit_of_measurement = UnitOfPower.WATT
+
+# Energy
+self._attr_device_class = SensorDeviceClass.ENERGY
+self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+# Current
+self._attr_device_class = SensorDeviceClass.CURRENT
+self._attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+
+# Voltage
+self._attr_device_class = SensorDeviceClass.VOLTAGE
+self._attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+```
+
+## Checklist
+
+- [ ] Constant added to `const.py`
+- [ ] Data field added to coordinator `__init__()` with default
+- [ ] Data extracted in appropriate OCPP handler
+- [ ] Sensor class created extending `BMWWallboxSensorBase`
+- [ ] Device class and unit set correctly
+- [ ] Sensor registered in `async_setup_entry()`
+- [ ] Test added to `tests/test_sensor.py`
+- [ ] Test passes: `pytest tests/test_sensor.py::test_new_metric_sensor -v`

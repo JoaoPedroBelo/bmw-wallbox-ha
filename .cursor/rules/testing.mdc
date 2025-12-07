@@ -1,0 +1,307 @@
+---
+description: Rules for writing tests for the BMW Wallbox integration
+globs:
+  - "**/test_*.py"
+  - "**/conftest.py"
+alwaysApply: false
+---
+
+# Rules: Writing Tests
+
+## Documentation References
+
+**Read first:**
+- `custom_components/bmw_wallbox/docs/TESTING.md` - Complete testing guide
+- `tests/conftest.py` - Available fixtures
+
+## Running Tests
+
+```bash
+# All tests
+pytest tests/ -v
+
+# Specific file
+pytest tests/test_sensor.py -v
+
+# Specific test
+pytest tests/test_sensor.py::test_power_sensor -v
+
+# With coverage
+pytest tests/ --cov=custom_components.bmw_wallbox
+```
+
+## Available Fixtures
+
+### mock_coordinator
+
+Mock `BMWWallboxCoordinator` with test data.
+
+```python
+async def test_something(mock_coordinator):
+    # Has all coordinator.data fields populated
+    assert mock_coordinator.data["power"] == 7000.0
+    assert mock_coordinator.current_transaction_id == "test-transaction-123"
+```
+
+### mock_config_entry
+
+Mock `ConfigEntry` with test configuration.
+
+```python
+async def test_something(mock_config_entry):
+    assert mock_config_entry.entry_id == "test_entry_id"
+    assert mock_config_entry.data["port"] == 9000
+```
+
+### mock_wallbox_charge_point
+
+Mock `WallboxChargePoint` for OCPP testing.
+
+```python
+async def test_something(mock_wallbox_charge_point):
+    mock_wallbox_charge_point.call = AsyncMock(return_value=response)
+```
+
+---
+
+## Testing Sensors
+
+```python
+from custom_components.bmw_wallbox.sensor import BMWWallboxPowerSensor
+
+async def test_power_sensor(hass, mock_coordinator, mock_config_entry):
+    """Test power sensor returns correct value."""
+    sensor = BMWWallboxPowerSensor(mock_coordinator, mock_config_entry)
+    
+    # Test value
+    assert sensor.native_value == 7000.0
+    
+    # Test unit
+    assert sensor.native_unit_of_measurement == "W"
+    
+    # Test device class
+    assert sensor.device_class == "power"
+```
+
+### Test with Data Changes
+
+```python
+async def test_sensor_updates(hass, mock_coordinator, mock_config_entry):
+    """Test sensor updates when data changes."""
+    sensor = BMWWallboxPowerSensor(mock_coordinator, mock_config_entry)
+    
+    # Initial value
+    assert sensor.native_value == 7000.0
+    
+    # Update coordinator data
+    mock_coordinator.data["power"] = 5000.0
+    
+    # Value should reflect change
+    assert sensor.native_value == 5000.0
+```
+
+### Test with Extra Attributes
+
+```python
+async def test_sensor_attributes(hass, mock_coordinator, mock_config_entry):
+    """Test sensor extra attributes."""
+    sensor = BMWWallboxStateSensor(mock_coordinator, mock_config_entry)
+    
+    attrs = sensor.extra_state_attributes
+    assert attrs["evse_id"] == 1
+    assert attrs["connector_id"] == 1
+```
+
+---
+
+## Testing Buttons
+
+```python
+from custom_components.bmw_wallbox.button import BMWWallboxStartButton
+
+async def test_start_button(hass, mock_coordinator, mock_config_entry):
+    """Test start charging button."""
+    button = BMWWallboxStartButton(mock_coordinator, mock_config_entry, hass)
+    
+    # Test properties
+    assert button.name == "Start Charging"
+    assert button._base_icon == "mdi:play"
+    
+    # Test press
+    await button.async_press()
+    
+    # Verify coordinator method was called
+    mock_coordinator.async_start_charging.assert_called_once()
+```
+
+---
+
+## Testing Numbers
+
+```python
+from custom_components.bmw_wallbox.number import BMWWallboxCurrentLimitNumber
+
+async def test_current_limit(hass, mock_coordinator, mock_config_entry):
+    """Test current limit number entity."""
+    number = BMWWallboxCurrentLimitNumber(mock_coordinator, mock_config_entry)
+    
+    # Test properties
+    assert number.native_min_value == 0
+    assert number.native_max_value == 32
+    
+    # Test set value
+    await number.async_set_native_value(16.0)
+    
+    # Verify coordinator method was called
+    mock_coordinator.async_set_current_limit.assert_called_once_with(16.0)
+```
+
+### Test Availability
+
+```python
+async def test_requires_transaction(hass, mock_coordinator, mock_config_entry):
+    """Test entity is unavailable without transaction."""
+    number = BMWWallboxCurrentLimitNumber(mock_coordinator, mock_config_entry)
+    
+    # With transaction - available
+    mock_coordinator.current_transaction_id = "test-123"
+    assert number.available is True
+    
+    # Without transaction - unavailable
+    mock_coordinator.current_transaction_id = None
+    assert number.available is False
+```
+
+---
+
+## Testing Config Flow
+
+```python
+from homeassistant import config_entries
+from custom_components.bmw_wallbox.const import DOMAIN
+
+async def test_config_flow(hass):
+    """Test successful config flow."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    assert result["type"] == "form"
+    assert result["step_id"] == "user"
+    
+    # Mock file existence
+    with patch("os.path.isfile", return_value=True):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "port": 9000,
+                "ssl_cert": "/ssl/fullchain.pem",
+                "ssl_key": "/ssl/privkey.pem",
+                "charge_point_id": "DE*BMW*TEST123",
+            },
+        )
+    
+    assert result2["type"] == "create_entry"
+```
+
+---
+
+## Best Practices
+
+### 1. Use Fixtures
+
+```python
+# Good: Use fixtures
+async def test_something(mock_coordinator, mock_config_entry):
+    entity = SomeEntity(mock_coordinator, mock_config_entry)
+
+# Avoid: Manual setup in every test
+async def test_something():
+    coordinator = MagicMock()
+    coordinator.data = {...}  # Duplicated
+```
+
+### 2. Test One Thing Per Test
+
+```python
+# Good: Focused test
+async def test_power_value(mock_coordinator, mock_config_entry):
+    sensor = PowerSensor(mock_coordinator, mock_config_entry)
+    assert sensor.native_value == 7000.0
+
+# Avoid: Multiple unrelated assertions
+async def test_power_sensor(mock_coordinator, mock_config_entry):
+    sensor = PowerSensor(mock_coordinator, mock_config_entry)
+    assert sensor.native_value == 7000.0
+    assert sensor.native_unit_of_measurement == "W"
+    assert sensor.device_class == "power"
+    # Too many things
+```
+
+### 3. Test Edge Cases
+
+```python
+# Test None values
+async def test_handles_none(mock_coordinator, mock_config_entry):
+    mock_coordinator.data["power"] = None
+    sensor = PowerSensor(mock_coordinator, mock_config_entry)
+    assert sensor.native_value is None
+
+# Test disconnected state
+async def test_disconnected(mock_coordinator, mock_config_entry):
+    mock_coordinator.data["connected"] = False
+    # ...
+```
+
+### 4. Use Descriptive Names
+
+```python
+# Good: Clear what is being tested
+async def test_current_limit_requires_active_transaction():
+    pass
+
+# Avoid: Vague
+async def test_number():
+    pass
+```
+
+### 5. Mock External Dependencies
+
+```python
+# Mock file system
+with patch("os.path.isfile", return_value=True):
+    # Test code
+
+# Mock OCPP call
+mock_coordinator.charge_point.call = AsyncMock(return_value=response)
+```
+
+---
+
+## Common Imports
+
+```python
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from homeassistant.core import HomeAssistant
+from homeassistant import config_entries
+
+from custom_components.bmw_wallbox.sensor import BMWWallboxPowerSensor
+from custom_components.bmw_wallbox.const import DOMAIN
+```
+
+---
+
+## Checklist for New Test
+
+- [ ] Test file created/updated in `tests/`
+- [ ] Uses appropriate fixtures (`mock_coordinator`, `mock_config_entry`)
+- [ ] Tests entity value/state
+- [ ] Tests entity properties (name, unit, device_class)
+- [ ] Tests unique_id format
+- [ ] Tests extra_state_attributes (if any)
+- [ ] Tests None/missing value handling
+- [ ] Tests availability conditions (if any)
+- [ ] Tests actions (for buttons/switches/numbers)
+- [ ] Test passes: `pytest tests/test_*.py::test_name -v`

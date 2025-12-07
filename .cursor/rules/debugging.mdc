@@ -1,0 +1,217 @@
+---
+description: Debugging and troubleshooting guide for the BMW Wallbox integration
+alwaysApply: false
+---
+
+# Rules: Debugging Issues
+
+## Documentation References
+
+**Read first:**
+- `custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md` - Complete troubleshooting guide
+
+## Enable Debug Logging
+
+Add to `configuration.yaml`:
+
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.bmw_wallbox: debug
+    ocpp: debug
+    websockets: debug
+```
+
+Restart Home Assistant, then check logs in:
+- UI: Settings → System → Logs
+- Docker: `docker logs homeassistant -f | grep bmw_wallbox`
+
+---
+
+## Common Issues Quick Reference
+
+### Entity Not Appearing
+
+**Check:**
+1. Entity registered in `async_setup_entry()`?
+2. Has unique_id?
+3. Platform in `PLATFORMS` list in `__init__.py`?
+4. Check logs for initialization errors
+
+**Fix:**
+```python
+# In sensor.py (or other platform file)
+async_add_entities([
+    # ... existing ...
+    BMWWallboxNewSensor(coordinator, entry),  # Add here
+])
+```
+
+---
+
+### Coordinator Data Not Updating
+
+**Check:**
+1. `async_set_updated_data()` called after data changes?
+2. Entity reading from `coordinator.data.get()`?
+3. OCPP messages being received?
+
+**Fix:**
+```python
+# In OCPP handler
+self.coordinator.data["field"] = new_value
+self.coordinator.async_set_updated_data(self.coordinator.data)  # Required!
+```
+
+---
+
+### OCPP Command Rejected
+
+**Check:**
+1. Transaction active? (for SetChargingProfile)
+2. Correct EVSE ID? (usually 1)
+3. Valid parameter values?
+4. Wallbox in correct state?
+
+**Fix:**
+```python
+# Before sending SetChargingProfile
+if not self.current_transaction_id:
+    _LOGGER.error("No transaction - cannot set profile!")
+    return False
+```
+
+---
+
+### SSL/Connection Failed
+
+**Check:**
+1. Certificate files exist and readable?
+2. Port accessible from wallbox?
+3. Correct OCPP URL on wallbox?
+4. Firewall not blocking?
+
+**Verify paths:**
+```python
+# Check in Home Assistant container
+ls -l /ssl/fullchain.pem
+ls -l /ssl/privkey.pem
+```
+
+**Correct URL format:**
+```
+wss://homeassistant-ip:9000/CHARGE_POINT_ID
+```
+
+---
+
+### Stuck Transaction
+
+**Recovery:**
+```python
+# Option 1: Reset wallbox
+await coordinator.async_reset_wallbox()
+# Wait ~60 seconds for reboot
+
+# Option 2: Unplug cable, wait 10s, replug
+```
+
+---
+
+### Command Timeout
+
+**Check:**
+1. Wallbox powered on and connected?
+2. Network connectivity?
+3. Check heartbeat in logs?
+
+**Increase timeout if needed:**
+```python
+# Default is 15 seconds
+response = await asyncio.wait_for(
+    self.charge_point.call(...),
+    timeout=30.0  # Increase if needed
+)
+```
+
+---
+
+## Debugging Techniques
+
+### Print Coordinator Data
+
+```python
+import json
+_LOGGER.debug("Coordinator data: %s", json.dumps(self.coordinator.data, default=str))
+```
+
+### Check OCPP Message Flow
+
+Enable ocpp debug logging to see all messages:
+
+```yaml
+logger:
+  logs:
+    ocpp: debug
+```
+
+### Verify Entity Registration
+
+```python
+# In __init__.py after setup
+_LOGGER.info("Entities: %s", [e.entity_id for e in hass.states.async_all()])
+```
+
+### Test OCPP Command Manually
+
+```python
+# Create test script
+import asyncio
+from ocpp.v201 import call
+
+async def test():
+    response = await charge_point.call(call.SomeCommand(...))
+    print(f"Response: {response}")
+
+asyncio.run(test())
+```
+
+---
+
+## Error Messages Reference
+
+| Error | Meaning | Solution |
+|-------|---------|----------|
+| "Wallbox not connected" | `charge_point` is None | Check network, wait for connection |
+| "No active charging session" | `transaction_id` is None | Start new transaction |
+| "Failed to start OCPP server" | Server won't bind | Check port, certificates |
+| "SetChargingProfile rejected" | Wallbox rejected command | Check transaction exists, valid limits |
+| "Command timed out" | No response in 15s | Check wallbox responding, network |
+
+---
+
+## Quick Diagnostic Checklist
+
+Run through this checklist:
+
+- [ ] Debug logging enabled?
+- [ ] SSL certificates exist and readable?
+- [ ] Port accessible from wallbox?
+- [ ] Wallbox configured with correct OCPP URL?
+- [ ] WebSocket connection established? (check heartbeats in log)
+- [ ] Transaction active? (for SetChargingProfile)
+- [ ] Entity registered in `async_setup_entry()`?
+- [ ] Entity has unique_id?
+- [ ] `async_set_updated_data()` called after data changes?
+- [ ] Entity reading from `coordinator.data`?
+
+---
+
+## Getting More Help
+
+1. **Check logs** - Most issues visible with debug logging
+2. **Review documentation** - See `docs/TROUBLESHOOTING.md` for detailed solutions
+3. **Check patterns** - See `docs/PATTERNS.md` for anti-patterns to avoid
+4. **Verify OCPP messages** - Enable ocpp debug logging
+5. **Test coordinator methods** - Use Python REPL or test script

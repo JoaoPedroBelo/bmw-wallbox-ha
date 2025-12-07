@@ -1,0 +1,148 @@
+---
+description: Rules for adding OCPP message handlers in coordinator
+globs:
+  - "**/coordinator.py"
+alwaysApply: false
+---
+
+# Rules: Adding an OCPP Message Handler
+
+## Documentation References
+
+**Read first:**
+- `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Section: "Template: Adding a New Handler"
+- `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Section: "OCPP Message Schemas"
+- `custom_components/bmw_wallbox/docs/PATTERNS.md` - Section: "Pattern: Updating Coordinator Data"
+
+## Files to Modify
+
+1. `custom_components/bmw_wallbox/coordinator.py` - `WallboxChargePoint` class
+
+## Handler Pattern
+
+```python
+# coordinator.py - in WallboxChargePoint class
+
+from ocpp.routing import on
+from ocpp.v201 import call_result
+
+@on("NewMessageType")
+async def on_new_message_type(
+    self,
+    required_param1,      # From OCPP spec
+    required_param2,      # From OCPP spec
+    **kwargs,             # Catch optional parameters
+):
+    """Handle NewMessageType from wallbox."""
+    _LOGGER.debug(
+        "NewMessageType received: %s, %s",
+        required_param1,
+        required_param2
+    )
+    
+    # Extract and update coordinator data
+    self.coordinator.data["new_field"] = required_param1
+    
+    # Extract from kwargs if optional
+    optional_val = kwargs.get("optional_param")
+    if optional_val:
+        self.coordinator.data["optional_field"] = optional_val
+    
+    # ALWAYS trigger entity updates
+    self.coordinator.async_set_updated_data(self.coordinator.data)
+    
+    # Return appropriate response
+    return call_result.NewMessageType(
+        response_param="value",
+    )
+```
+
+## Step-by-Step Guide
+
+### Step 1: Add Data Fields (coordinator.py)
+
+In `BMWWallboxCoordinator.__init__()`:
+
+```python
+self.data: dict[str, Any] = {
+    # ... existing fields ...
+    "new_field": None,
+    "optional_field": None,
+}
+```
+
+### Step 2: Add Handler Method (coordinator.py)
+
+In `WallboxChargePoint` class, add the handler method.
+
+### Step 3: Create Entity (if needed)
+
+If this data should be exposed as an entity, follow `.cursor/rules/add-sensor.md`.
+
+## Critical Rules for Handlers
+
+1. **Use @on() decorator** - `@on("MessageType")` registers the handler
+2. **Include **kwargs** - Handles optional/unknown parameters
+3. **Always return call_result** - Return appropriate response type
+4. **Call async_set_updated_data()** - After modifying coordinator.data
+5. **Log received data** - Use `_LOGGER.debug()` for debugging
+
+## Common OCPP Messages
+
+```python
+# Boot notification - device info
+@on("BootNotification")
+async def on_boot_notification(self, charging_station, reason, **kwargs):
+    # Extract device info
+    return call_result.BootNotification(...)
+
+# Status notification - connector status
+@on("StatusNotification")
+async def on_status_notification(self, timestamp, connector_status, evse_id, connector_id, **kwargs):
+    # Update status
+    return call_result.StatusNotification()
+
+# Heartbeat - keepalive
+@on("Heartbeat")
+async def on_heartbeat(self, **kwargs):
+    # Update connection status
+    return call_result.Heartbeat(...)
+
+# Transaction event - main data source
+@on("TransactionEvent")
+async def on_transaction_event(self, event_type, timestamp, trigger_reason, seq_no, transaction_info, **kwargs):
+    # Extract meter values and state
+    return call_result.TransactionEvent()
+```
+
+## Processing Meter Values
+
+For TransactionEvent with meter values:
+
+```python
+meter_value = kwargs.get("meter_value", [])
+if meter_value:
+    for mv in meter_value:
+        for sample in mv.get("sampled_value", []):
+            measurand = sample.get("measurand")
+            value = sample.get("value")
+            phase = sample.get("phase")
+            
+            if measurand == "Power.Active.Import":
+                self.coordinator.data["power"] = float(value)
+            elif measurand == "Voltage":
+                if phase == "L1":
+                    self.coordinator.data["voltage_l1"] = float(value)
+```
+
+## Checklist
+
+- [ ] Data fields added to coordinator `__init__()`
+- [ ] Handler method added to `WallboxChargePoint` class
+- [ ] Decorated with `@on("MessageType")`
+- [ ] Includes **kwargs parameter
+- [ ] Returns appropriate `call_result` type
+- [ ] Calls `async_set_updated_data()`
+- [ ] Includes debug logging
+- [ ] Entity created (if exposing data)
+- [ ] Tested with actual wallbox messages

@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BMW Wallbox Setup",
+        "description": "Configure your BMW wallbox OCPP connection",
+        "data": {
+          "port": "WebSocket Port",
+          "ssl_cert": "SSL Certificate Path",
+          "ssl_key": "SSL Key Path",
+          "charge_point_id": "Charge Point ID",
+          "rfid_token": "RFID Token (Optional)",
+          "max_current": "Maximum Current (A)"
+        }
+      }
+    },
+    "error": {
+      "invalid_port": "Invalid port number (must be 1-65535)",
+      "invalid_ssl_cert": "SSL certificate file not found",
+      "invalid_ssl_key": "SSL key file not found",
+      "cannot_connect": "Failed to start OCPP server",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
+
