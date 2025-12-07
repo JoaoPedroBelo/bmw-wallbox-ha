@@ -2,6 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/tests.yml/badge.svg)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/tests.yml)
 
 A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Delta Electronics EIAW-E22KTSE6B04) using the OCPP 2.0.1 protocol.
 
