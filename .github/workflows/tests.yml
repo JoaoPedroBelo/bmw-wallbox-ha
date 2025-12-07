@@ -50,3 +50,4 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
         continue-on-error: true
+

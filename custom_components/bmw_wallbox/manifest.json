@@ -3,6 +3,7 @@
   "name": "BMW Wallbox (OCPP)",
   "version": "1.0.0",
   "documentation": "https://github.com/JoaoPedroBelo/bmw-wallbox-ha",
+  "issue_tracker": "https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues",
   "requirements": [
     "ocpp>=0.20.0"
   ],
