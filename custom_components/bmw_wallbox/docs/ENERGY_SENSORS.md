@@ -508,3 +508,4 @@ utility_meter:
 - [DATA_SCHEMAS.md](DATA_SCHEMAS.md) - Data structure details
 - [COORDINATOR.md](COORDINATOR.md) - Coordinator API reference
 - [Home Assistant Energy Dashboard](https://www.home-assistant.io/docs/energy/)
+

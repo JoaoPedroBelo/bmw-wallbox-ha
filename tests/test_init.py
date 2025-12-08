@@ -179,3 +179,4 @@ async def test_multiple_entries(mock_hass):
         assert len(mock_hass.data[DOMAIN]) == 2
         assert mock_hass.data[DOMAIN]["entry_1"] == mock_coordinator1
         assert mock_hass.data[DOMAIN]["entry_2"] == mock_coordinator2
+
