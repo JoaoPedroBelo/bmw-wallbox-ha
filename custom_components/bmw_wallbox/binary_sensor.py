@@ -101,4 +101,3 @@ class BMWWallboxConnectedBinarySensor(BMWWallboxBinarySensorBase):
         return {
             "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
         }
-

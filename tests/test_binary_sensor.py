@@ -100,4 +100,3 @@ async def test_connected_binary_sensor_no_heartbeat_attributes(hass: HomeAssista
     
     attrs = sensor.extra_state_attributes
     assert attrs["last_heartbeat"] is None
-

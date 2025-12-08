@@ -106,4 +106,3 @@ class InvalidSSLCert(HomeAssistantError):
 
 class InvalidSSLKey(HomeAssistantError):
     """Error to indicate invalid SSL key."""
-

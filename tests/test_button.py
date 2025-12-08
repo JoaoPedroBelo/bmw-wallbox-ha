@@ -102,4 +102,3 @@ async def test_button_prevents_double_press(hass: HomeAssistant, mock_coordinato
     
     # Method should not be called
     mock_coordinator.async_start_charging.assert_not_called()
-

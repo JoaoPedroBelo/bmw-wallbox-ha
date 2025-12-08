@@ -584,4 +584,3 @@ async def test_trigger_meter_values_error(coordinator):
     result = await coordinator.async_trigger_meter_values()
     
     assert result is False
-

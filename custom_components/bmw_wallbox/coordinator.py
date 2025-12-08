@@ -1129,4 +1129,3 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("Failed to set LED brightness: %s", err)
             return False
-

@@ -441,4 +441,3 @@ async def test_energy_period_sensors_no_current_session(hass: HomeAssistant, moc
     assert weekly_sensor.native_value == 20.0
     assert monthly_sensor.native_value == 100.0
     assert yearly_sensor.native_value == 500.0
-

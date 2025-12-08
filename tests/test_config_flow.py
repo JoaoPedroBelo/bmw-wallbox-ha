@@ -106,4 +106,3 @@ async def test_duplicate_entry(hass: HomeAssistant) -> None:
     
     assert result2["type"] == FlowResultType.ABORT
     assert result2["reason"] == "already_configured"
-

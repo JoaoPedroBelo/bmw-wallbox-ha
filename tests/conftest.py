@@ -61,4 +61,3 @@ def mock_wallbox_charge_point():
         charge_point.call = AsyncMock()
         mock.return_value = charge_point
         yield charge_point
-

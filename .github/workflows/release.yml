@@ -195,3 +195,4 @@ jobs:
           echo "2. Wait 5-15 minutes for HACS to detect the update" >> $GITHUB_STEP_SUMMARY
           echo "3. Test the release in a Home Assistant instance" >> $GITHUB_STEP_SUMMARY
           echo "4. Monitor issues for bug reports" >> $GITHUB_STEP_SUMMARY
+

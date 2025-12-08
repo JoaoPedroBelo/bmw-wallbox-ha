@@ -74,4 +74,3 @@ ATTR_ID_TOKEN_TYPE: Final = "id_token_type"
 ATTR_CONTEXT: Final = "context"
 ATTR_LOCATION: Final = "location"
 ATTR_PHASE: Final = "phase"
-

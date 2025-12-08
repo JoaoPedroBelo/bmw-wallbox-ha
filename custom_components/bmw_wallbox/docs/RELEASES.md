@@ -287,3 +287,4 @@ If you have questions about the release process:
 - Review CHANGELOG: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/blob/main/CHANGELOG.md
 - Open discussion: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/discussions
 
+
