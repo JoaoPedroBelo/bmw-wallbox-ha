@@ -251,10 +251,8 @@ class BMWWallboxEnergyDailySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return daily energy in kWh."""
-        # Daily energy from period counter + current session contribution
-        daily_base = self.coordinator.data.get("energy_daily", 0.0)
-        current_session = self.coordinator.data.get("last_session_energy", 0.0)
-        return daily_base + current_session
+        # Daily energy from period counter (accumulated from completed sessions)
+        return self.coordinator.data.get("energy_daily", 0.0)
     
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -279,9 +277,8 @@ class BMWWallboxEnergyWeeklySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return weekly energy in kWh."""
-        weekly_base = self.coordinator.data.get("energy_weekly", 0.0)
-        current_session = self.coordinator.data.get("last_session_energy", 0.0)
-        return weekly_base + current_session
+        # Weekly energy from period counter (accumulated from completed sessions)
+        return self.coordinator.data.get("energy_weekly", 0.0)
     
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -306,9 +303,8 @@ class BMWWallboxEnergyMonthlySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return monthly energy in kWh."""
-        monthly_base = self.coordinator.data.get("energy_monthly", 0.0)
-        current_session = self.coordinator.data.get("last_session_energy", 0.0)
-        return monthly_base + current_session
+        # Monthly energy from period counter (accumulated from completed sessions)
+        return self.coordinator.data.get("energy_monthly", 0.0)
     
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -333,9 +329,8 @@ class BMWWallboxEnergyYearlySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return yearly energy in kWh."""
-        yearly_base = self.coordinator.data.get("energy_yearly", 0.0)
-        current_session = self.coordinator.data.get("last_session_energy", 0.0)
-        return yearly_base + current_session
+        # Yearly energy from period counter (accumulated from completed sessions)
+        return self.coordinator.data.get("energy_yearly", 0.0)
     
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
