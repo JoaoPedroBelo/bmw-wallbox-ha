@@ -80,8 +80,5 @@ fix:
 	@echo "✓ Fixed!"
 
 # Remove trailing whitespace and fix blank lines
-clean-whitespace:
-	@echo "Cleaning whitespace and blank lines..."
-	find custom_components/ tests/ -name "*.py" -type f -exec sed -i '' -e 's/[[:space:]]*$$//' {} +
-	ruff format custom_components/ tests/
-	@echo "✓ Whitespace cleaned!"
+clean-whitespace: format
+	@echo "✓ Whitespace cleaned by ruff format!"

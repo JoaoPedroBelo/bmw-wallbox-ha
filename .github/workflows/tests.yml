@@ -26,13 +26,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff mypy
 
-      - name: Run Ruff Check
+      - name: Run Ruff Linter
         run: |
+          echo "Running Ruff linter..."
           ruff check custom_components/ tests/ --output-format=github
 
-      - name: Run Ruff Format Check
+      - name: Check Code Formatting (Ruff Format)
         run: |
+          echo "Checking code formatting..."
           ruff format custom_components/ tests/ --check --diff
+          echo ""
+          echo "💡 If formatting issues found, run: make format"
 
       - name: Run MyPy (Type Checking)
         run: |
