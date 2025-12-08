@@ -347,6 +347,47 @@ if success:
 
 ## Internal Methods
 
+### _check_and_reset_period_counters
+
+**Location:** `coordinator.py:471-501`
+
+```python
+def _check_and_reset_period_counters(self) -> None:
+    """Check if any period counters need reset based on current time."""
+```
+
+**Purpose:** Automatically resets period-based energy counters at appropriate times.
+
+**Reset Logic:**
+- **Daily**: Resets when `now.date() > last_reset.date()`
+- **Weekly**: Resets when `now.weekday() == 0` (Monday) AND date changed
+- **Monthly**: Resets when `now.month != last_reset.month` OR year changed
+- **Yearly**: Resets when `now.year != last_reset.year`
+
+**Behavior:**
+- Called at the start of every `on_transaction_event()`
+- Resets counter to 0.0 when reset time is reached
+- Updates `last_reset_*` timestamp
+- Logs reset events for debugging
+
+**Affected Data Fields:**
+- `energy_daily` → 0.0
+- `energy_weekly` → 0.0
+- `energy_monthly` → 0.0
+- `energy_yearly` → 0.0
+- `last_reset_daily` → current datetime
+- `last_reset_weekly` → current datetime
+- `last_reset_monthly` → current datetime
+- `last_reset_yearly` → current datetime
+
+**Example Log Output:**
+```
+INFO:custom_components.bmw_wallbox.coordinator:Daily energy counter reset
+INFO:custom_components.bmw_wallbox.coordinator:Monthly energy counter reset
+```
+
+---
+
 ### _async_update_data
 
 **Location:** `coordinator.py:310-314`

@@ -76,7 +76,11 @@ Used to create unique entity IDs: `{config_entry_id}_{SENSOR_*}`
 |----------|-------|----------------|
 | `SENSOR_POWER` | `"power"` | Power consumption (W) |
 | `SENSOR_ENERGY_SESSION` | `"energy_session"` | Session energy (Wh) |
-| `SENSOR_ENERGY_TOTAL` | `"energy_total"` | Total energy (kWh) |
+| `SENSOR_ENERGY_TOTAL` | `"energy_total"` | Total cumulative energy (kWh) - Energy Dashboard |
+| `SENSOR_ENERGY_DAILY` | `"energy_daily"` | Daily energy (kWh) - resets at midnight |
+| `SENSOR_ENERGY_WEEKLY` | `"energy_weekly"` | Weekly energy (kWh) - resets Monday |
+| `SENSOR_ENERGY_MONTHLY` | `"energy_monthly"` | Monthly energy (kWh) - resets 1st of month |
+| `SENSOR_ENERGY_YEARLY` | `"energy_yearly"` | Yearly energy (kWh) - resets January 1st |
 | `SENSOR_STATE` | `"state"` | Charging state |
 | `SENSOR_TRANSACTION_ID` | `"transaction_id"` | Transaction UUID |
 | `SENSOR_CURRENT` | `"current"` | Charging current (A) |
@@ -283,6 +287,10 @@ UPDATE_INTERVAL: Final = 10  # seconds
 SENSOR_POWER: Final = "power"
 SENSOR_ENERGY_SESSION: Final = "energy_session"
 SENSOR_ENERGY_TOTAL: Final = "energy_total"
+SENSOR_ENERGY_DAILY: Final = "energy_daily"
+SENSOR_ENERGY_WEEKLY: Final = "energy_weekly"
+SENSOR_ENERGY_MONTHLY: Final = "energy_monthly"
+SENSOR_ENERGY_YEARLY: Final = "energy_yearly"
 SENSOR_STATE: Final = "state"
 SENSOR_TRANSACTION_ID: Final = "transaction_id"
 SENSOR_CURRENT: Final = "current"

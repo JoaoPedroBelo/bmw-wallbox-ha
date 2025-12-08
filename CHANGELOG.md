@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2024-12-08
+
+### Added
+- **Energy Daily Sensor** - Automatically resets at midnight for daily consumption tracking
+- **Energy Weekly Sensor** - Automatically resets every Monday for weekly consumption tracking
+- **Energy Monthly Sensor** - Automatically resets on 1st of month for monthly billing cycles
+- **Energy Yearly Sensor** - Automatically resets on January 1st for annual consumption tracking
+- Period-based energy sensors with automatic time-based resets
+- `last_reset` attribute on all period sensors showing when counter was last reset
+- Comprehensive energy sensor documentation (ENERGY_SENSORS.md)
+
+### Fixed
+- **Energy Total Sensor** - Now properly accumulates energy across ALL charging sessions
+- Session end detection to prevent energy loss between charging sessions
+- Energy Dashboard integration - sensor no longer resets with each session
+- Cumulative energy tracking across wallbox restarts
+
+### Changed
+- Energy Total sensor now uses true cumulative tracking (never resets)
+- Period sensors include current session energy for real-time updates
+- Improved energy measurement accuracy with 0.1 kWh session detection threshold
+
+### Technical
+- Added `_check_and_reset_period_counters()` method for automatic period resets
+- Session end detection based on energy value drops
+- New coordinator data fields: `energy_cumulative`, `last_session_energy`, period counters
+- Reset timestamps tracked for each period (daily/weekly/monthly/yearly)
+- All period sensors use `state_class: TOTAL_INCREASING` for proper HA statistics
+
+### Documentation
+- Updated ENTITIES.md with energy sensor details and examples
+- Updated DATA_SCHEMAS.md with new cumulative tracking fields
+- Updated CONSTANTS.md with new sensor constants
+- Updated COORDINATOR.md with reset logic documentation
+- Added comprehensive ENERGY_SENSORS.md guide with:
+  - Detailed usage instructions for each sensor
+  - Energy Dashboard setup guide
+  - Example automations and Lovelace cards
+  - Advanced use cases (solar optimization, dynamic pricing, load balancing)
+  - Troubleshooting section
+  - Migration guide
+
+### Tests
+- Added comprehensive test coverage for all new energy sensors
+- Tests verify period calculations with and without active sessions
+- Tests verify last_reset attribute formatting
+- All existing tests continue to pass
+
+[1.1.0]: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/releases/tag/v1.1.0
+
 ## [1.0.1] - 2024-12-07
 
 ### Added

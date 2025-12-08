@@ -170,6 +170,9 @@ class WallboxChargePoint(cp):
             transaction_info.get("charging_state", "Unknown"),
         )
         
+        # Check and reset period counters if needed
+        self.coordinator._check_and_reset_period_counters()
+        
         # Extract transaction ID
         self.current_transaction_id = transaction_info.get("transaction_id")
         self.coordinator.current_transaction_id = self.current_transaction_id
@@ -230,8 +233,30 @@ class WallboxChargePoint(cp):
                     
                     # Energy measurements
                     elif measurand == "Energy.Active.Import.Register":
-                        self.coordinator.data["energy_total"] = float(value) / 1000  # Wh to kWh
-                        self.coordinator.data["energy_session"] = float(value)  # Keep Wh for session
+                        session_energy_wh = float(value)
+                        session_energy_kwh = session_energy_wh / 1000.0
+                        
+                        # Session tracking (existing)
+                        self.coordinator.data["energy_session"] = session_energy_wh
+                        
+                        # Detect session end (energy dropped significantly = new session started)
+                        last_session = self.coordinator.data.get("last_session_energy", 0.0)
+                        if session_energy_kwh < last_session - 0.1:  # New session detected
+                            _LOGGER.info("New session detected - adding %.2f kWh to cumulative", last_session)
+                            # Add last session's final value to cumulative
+                            self.coordinator.data["energy_cumulative"] += last_session
+                            self.coordinator.data["energy_daily"] += last_session
+                            self.coordinator.data["energy_weekly"] += last_session
+                            self.coordinator.data["energy_monthly"] += last_session
+                            self.coordinator.data["energy_yearly"] += last_session
+                        
+                        # Store current session energy
+                        self.coordinator.data["last_session_energy"] = session_energy_kwh
+                        
+                        # Total = cumulative + current session
+                        self.coordinator.data["energy_total"] = (
+                            self.coordinator.data["energy_cumulative"] + session_energy_kwh
+                        )
                     elif measurand == "Energy.Active.Export.Register":
                         self.coordinator.data["energy_active_export"] = float(value) / 1000
                     elif measurand == "Energy.Reactive.Import.Register":
@@ -428,7 +453,52 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "temperature": None,
             # Configurable settings
             "led_brightness": 46,  # Default from capabilities report
+            # Cumulative energy tracking (for Energy Dashboard)
+            "energy_cumulative": 0.0,       # Never resets - true lifetime total
+            "last_session_energy": 0.0,     # Last seen session energy (to detect session end)
+            # Period-based energy tracking (auto-reset)
+            "energy_daily": 0.0,            # Resets at midnight
+            "energy_weekly": 0.0,           # Resets on Monday
+            "energy_monthly": 0.0,          # Resets on 1st of month
+            "energy_yearly": 0.0,           # Resets on January 1st
+            # Timestamp tracking for resets
+            "last_reset_daily": None,       # datetime of last daily reset
+            "last_reset_weekly": None,
+            "last_reset_monthly": None,
+            "last_reset_yearly": None,
         }
+
+    def _check_and_reset_period_counters(self) -> None:
+        """Check if any period counters need reset based on current time."""
+        now = datetime.now()
+        
+        # Daily reset (midnight)
+        last_daily = self.data.get("last_reset_daily")
+        if last_daily is None or now.date() > last_daily.date():
+            _LOGGER.info("Daily energy counter reset")
+            self.data["energy_daily"] = 0.0
+            self.data["last_reset_daily"] = now
+        
+        # Weekly reset (Monday)
+        last_weekly = self.data.get("last_reset_weekly")
+        if last_weekly is None or (now.date() > last_weekly.date() and now.weekday() == 0):
+            _LOGGER.info("Weekly energy counter reset")
+            self.data["energy_weekly"] = 0.0
+            self.data["last_reset_weekly"] = now
+        
+        # Monthly reset (1st of month)
+        last_monthly = self.data.get("last_reset_monthly")
+        if last_monthly is None or now.month != last_monthly.month or now.year != last_monthly.year:
+            _LOGGER.info("Monthly energy counter reset")
+            self.data["energy_monthly"] = 0.0
+            self.data["last_reset_monthly"] = now
+        
+        # Yearly reset (January 1st)
+        last_yearly = self.data.get("last_reset_yearly")
+        if last_yearly is None or now.year != last_yearly.year:
+            _LOGGER.info("Yearly energy counter reset")
+            self.data["energy_yearly"] = 0.0
+            self.data["last_reset_yearly"] = now
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the wallbox."""

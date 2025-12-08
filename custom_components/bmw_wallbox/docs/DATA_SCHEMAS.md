@@ -115,14 +115,48 @@ coordinator.data: dict[str, Any] = {
     # ═══════════════════════════════════════════════════════════════════
     # ENERGY MEASUREMENTS (from TransactionEvent meter_value)
     # ═══════════════════════════════════════════════════════════════════
-    "energy_total": float,       # Total energy imported (kWh)
+    "energy_total": float,       # Total cumulative energy (kWh) - for Energy Dashboard
                                  # Default: 0.0
-                                 # Measurand: "Energy.Active.Import.Register"
-                                 # Note: Converted from Wh to kWh
+                                 # Calculated: energy_cumulative + last_session_energy
+                                 # Note: Never resets, accumulates across all sessions
 
-    "energy_session": float,     # Session energy (Wh)
+    "energy_session": float,     # Current session energy (Wh)
                                  # Default: 0.0
                                  # Measurand: "Energy.Active.Import.Register" (raw)
+    
+    "energy_cumulative": float,  # Cumulative energy from completed sessions (kWh)
+                                 # Default: 0.0
+                                 # Updated: When new session detected (energy drop)
+    
+    "last_session_energy": float,  # Last seen session energy for session detection (kWh)
+                                   # Default: 0.0
+                                   # Used to detect session end and add to cumulative
+    
+    # Period-based energy tracking (auto-reset)
+    "energy_daily": float,       # Daily energy (kWh) - resets at midnight
+                                 # Default: 0.0
+    
+    "energy_weekly": float,      # Weekly energy (kWh) - resets Monday midnight
+                                 # Default: 0.0
+    
+    "energy_monthly": float,     # Monthly energy (kWh) - resets 1st of month
+                                 # Default: 0.0
+    
+    "energy_yearly": float,      # Yearly energy (kWh) - resets January 1st
+                                 # Default: 0.0
+    
+    # Reset timestamp tracking
+    "last_reset_daily": datetime | None,    # Last daily reset timestamp
+                                            # Default: None
+    
+    "last_reset_weekly": datetime | None,   # Last weekly reset timestamp
+                                             # Default: None
+    
+    "last_reset_monthly": datetime | None,  # Last monthly reset timestamp
+                                             # Default: None
+    
+    "last_reset_yearly": datetime | None,   # Last yearly reset timestamp
+                                             # Default: None
 
     "energy_active_export": float | None,  # Energy exported (kWh)
                                            # Default: None

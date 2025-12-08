@@ -4,7 +4,7 @@
 
 | Platform | File | Count | Base Class |
 |----------|------|-------|------------|
-| Sensor | `sensor.py` | 15 | `BMWWallboxSensorBase` |
+| Sensor | `sensor.py` | 19 | `BMWWallboxSensorBase` |
 | Binary Sensor | `binary_sensor.py` | 2 | `BMWWallboxBinarySensorBase` |
 | Button | `button.py` | 2 | `BMWWallboxButtonBase` |
 | Number | `number.py` | 2 | Direct `CoordinatorEntity` |
@@ -21,8 +21,12 @@ CoordinatorEntity (Home Assistant)
     │       └── BMWWallboxSensorBase          # sensor.py:64-86
     │               ├── BMWWallboxStatusSensor
     │               ├── BMWWallboxPowerSensor
-    │               ├── BMWWallboxEnergyTotalSensor
-    │               ├── BMWWallboxEnergySessionSensor
+    │               ├── BMWWallboxEnergyTotalSensor           # For Energy Dashboard
+    │               ├── BMWWallboxEnergySessionSensor         # Per-session tracking
+    │               ├── BMWWallboxEnergyDailySensor           # Resets at midnight
+    │               ├── BMWWallboxEnergyWeeklySensor          # Resets Monday
+    │               ├── BMWWallboxEnergyMonthlySensor         # Resets 1st of month
+    │               ├── BMWWallboxEnergyYearlySensor          # Resets Jan 1st
     │               ├── BMWWallboxCurrentSensor
     │               ├── BMWWallboxVoltageSensor
     │               ├── BMWWallboxStateSensor
@@ -477,6 +481,86 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
             and self.coordinator.current_transaction_id is not None
         )
 ```
+
+---
+
+## Energy Sensors
+
+The integration provides comprehensive energy tracking with automatic period-based resets.
+
+### Energy Total Sensor
+
+**Purpose:** Lifetime cumulative energy tracking for Home Assistant Energy Dashboard
+
+**Implementation:**
+- Uses `state_class: TOTAL_INCREASING` for proper Energy Dashboard integration
+- Accumulates energy across ALL charging sessions
+- Never resets - provides true lifetime totals
+- Calculated as: `energy_cumulative + current_session_energy`
+
+**Session End Detection:**
+- Monitors energy value for drops > 0.1 kWh
+- When detected, adds last session's final value to cumulative counters
+- Ensures no energy is lost between sessions
+
+**Usage:**
+```yaml
+# Add to Energy Dashboard
+Settings → Dashboards → Energy → Individual Devices
+Select: sensor.bmw_wallbox_energy_total
+```
+
+### Period-Based Energy Sensors
+
+Four sensors that automatically reset at specific intervals:
+
+| Sensor | Reset Schedule | Icon | Use Case |
+|--------|---------------|------|----------|
+| **Energy Daily** | Midnight every day | calendar-today | Daily usage patterns |
+| **Energy Weekly** | Monday at midnight | calendar-week | Work vs weekend comparison |
+| **Energy Monthly** | 1st of each month | calendar-month | Billing cycles |
+| **Energy Yearly** | January 1st | calendar | Annual consumption |
+
+**Implementation Details:**
+- All use `state_class: TOTAL_INCREASING` for statistics
+- Values calculated as: `period_base + current_session_energy`
+- Include `last_reset` timestamp in extra attributes
+- Reset logic runs on every TransactionEvent
+- Persist across Home Assistant restarts
+
+**Example Attributes:**
+```python
+sensor.bmw_wallbox_energy_daily:
+  state: 12.5  # kWh
+  attributes:
+    last_reset: "2025-12-08T00:00:00"
+    unit_of_measurement: "kWh"
+    device_class: "energy"
+    state_class: "total_increasing"
+```
+
+**Automation Example:**
+```yaml
+automation:
+  - alias: "High Daily Charging Alert"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.bmw_wallbox_energy_daily
+        above: 50
+    action:
+      - service: notify.mobile_app
+        data:
+          message: "High charging usage: {{ states('sensor.bmw_wallbox_energy_daily') }} kWh today"
+```
+
+### Energy Session Sensor
+
+**Purpose:** Track energy for current charging session only
+
+**Implementation:**
+- Reports energy in Wh (not kWh) for precision
+- Resets when new session starts
+- Useful for per-charge monitoring
 
 ---
 
