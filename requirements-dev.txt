@@ -1,0 +1,14 @@
+# Development dependencies for BMW Wallbox integration
+# Install: pip install -r requirements-dev.txt
+
+# Include test dependencies
+-r requirements-test.txt
+
+# Linting and formatting
+ruff>=0.8.0
+mypy>=1.7.0
+pre-commit>=3.5.0
+
+# Type stubs
+types-requests
+types-pyyaml

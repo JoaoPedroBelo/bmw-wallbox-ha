@@ -118,6 +118,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# Ruff
+.ruff_cache/
+
 # Pyre type checker
 .pyre/
 
@@ -134,6 +137,7 @@ home-assistant.log
 home-assistant_v2.db
 *.db-shm
 *.db-wal
+
 
 
 
