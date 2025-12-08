@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2024-12-08
+
+### Fixed
+- **Energy Period Sensors Bug** - Fixed critical issue where daily, weekly, monthly, and yearly energy sensors were all showing the same value (total energy) instead of their respective period consumption
+- Period sensors now correctly track energy consumed in their specific time periods
+- Removed incorrect addition of current session energy to period counters
+
+### Added
+- **Comprehensive Linting Setup** - Added Ruff, MyPy, and pre-commit hooks following Home Assistant best practices
+- **Development Tools** - Added Makefile with quick commands (`make lint`, `make format`, `make test`)
+- **Code Quality Enforcement** - CI now fails on formatting issues
+- **Contributing Guide** - Added CONTRIBUTING.md with development guidelines
+- **Pre-commit Hooks** - Automatic code formatting and validation on commit
+- Automated trailing whitespace and blank line cleanup
+
+### Changed
+- Improved GitHub Actions workflows with separate lint workflow
+- Enhanced release workflow to continue on HACS validation errors
+- Cleaned up all trailing whitespace and blank lines across codebase
+- Updated pyproject.toml with comprehensive tool configurations
+
+### Documentation
+- Added .ruff-format-on-save.md guide for editor integration
+- Added .github/DEVELOPMENT.md quick reference
+- Updated all development documentation
+
+### Technical
+- All Python files now have exactly 1 trailing newline (PEP 8 compliant)
+- Ruff configured with Home Assistant-compatible rules
+- MyPy strict type checking enabled
+- Pre-commit hooks for automated quality checks
+
 ## [1.1.0] - 2024-12-08
 
 ### Added
