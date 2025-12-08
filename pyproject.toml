@@ -33,7 +33,7 @@ lint.select = [
     "B",     # flake8-bugbear
     "C4",    # flake8-comprehensions
     "COM",   # flake8-commas
-    "E",     # pycodestyle errors
+    "E",     # pycodestyle errors (includes blank line rules)
     "F",     # pyflakes
     "I",     # isort
     "N",     # pep8-naming
@@ -48,7 +48,7 @@ lint.select = [
     "SIM",   # flake8-simplify
     "T20",   # flake8-print
     "UP",    # pyupgrade
-    "W",     # pycodestyle warnings
+    "W",     # pycodestyle warnings (includes blank line warnings)
 ]
 
 lint.ignore = [
@@ -62,6 +62,10 @@ lint.ignore = [
     "S108",    # probable insecure usage of temp file/directory
     "ARG002",  # unused method argument (common in event handlers)
 ]
+
+# Additional blank line rules
+[tool.ruff.lint.pycodestyle]
+max-line-length = 88
 
 # Exclude patterns
 exclude = [

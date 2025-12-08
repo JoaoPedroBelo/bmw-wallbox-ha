@@ -6,14 +6,16 @@
 help:
 	@echo "BMW Wallbox Development Commands:"
 	@echo ""
-	@echo "  make install      Install development dependencies"
-	@echo "  make lint         Run all linters (ruff, mypy)"
-	@echo "  make format       Auto-format code with ruff"
-	@echo "  make test         Run all tests"
-	@echo "  make coverage     Run tests with coverage report"
-	@echo "  make clean        Remove generated files"
-	@echo "  make pre-commit   Install pre-commit hooks"
-	@echo "  make check        Run all checks (lint + test)"
+	@echo "  make install            Install development dependencies"
+	@echo "  make lint               Run all linters (ruff, mypy)"
+	@echo "  make format             Auto-format code with ruff"
+	@echo "  make test               Run all tests"
+	@echo "  make coverage           Run tests with coverage report"
+	@echo "  make clean              Remove generated files"
+	@echo "  make pre-commit         Install pre-commit hooks"
+	@echo "  make check              Run all checks (lint + test)"
+	@echo "  make fix                Auto-fix common issues"
+	@echo "  make clean-whitespace   Remove trailing whitespace and blank lines"
 	@echo ""
 
 install:
@@ -76,3 +78,10 @@ fix:
 	ruff check custom_components/ tests/ --fix
 	ruff format custom_components/ tests/
 	@echo "✓ Fixed!"
+
+# Remove trailing whitespace and fix blank lines
+clean-whitespace:
+	@echo "Cleaning whitespace and blank lines..."
+	find custom_components/ tests/ -name "*.py" -type f -exec sed -i '' -e 's/[[:space:]]*$$//' {} +
+	ruff format custom_components/ tests/
+	@echo "✓ Whitespace cleaned!"
