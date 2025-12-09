@@ -80,3 +80,4 @@ repos:
             except Exception as e:
                 print(f'Error validating manifest.json: {e}')
                 sys.exit(1)
+

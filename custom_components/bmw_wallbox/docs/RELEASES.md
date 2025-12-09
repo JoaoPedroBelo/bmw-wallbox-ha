@@ -288,3 +288,4 @@ If you have questions about the release process:
 - Open discussion: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/discussions
 
 
+

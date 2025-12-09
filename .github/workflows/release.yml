@@ -196,3 +196,4 @@ jobs:
           echo "3. Test the release in a Home Assistant instance" >> $GITHUB_STEP_SUMMARY
           echo "4. Monitor issues for bug reports" >> $GITHUB_STEP_SUMMARY
 
+

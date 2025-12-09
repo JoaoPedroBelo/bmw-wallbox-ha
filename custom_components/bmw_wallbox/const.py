@@ -1,4 +1,5 @@
 """Constants for the BMW Wallbox integration."""
+
 from typing import Final
 
 DOMAIN: Final = "bmw_wallbox"

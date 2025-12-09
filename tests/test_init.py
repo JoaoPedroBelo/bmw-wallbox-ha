@@ -1,11 +1,12 @@
 """Test BMW Wallbox integration setup and teardown."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+import pytest
 
 from custom_components.bmw_wallbox import (
     DOMAIN,
@@ -58,20 +59,22 @@ async def test_async_setup_entry(mock_hass, mock_config_entry):
         mock_coordinator = MagicMock()
         mock_coordinator.async_start_server = AsyncMock()
         mock_coordinator_class.return_value = mock_coordinator
-        
+
         result = await async_setup_entry(mock_hass, mock_config_entry)
-        
+
         assert result is True
         assert DOMAIN in mock_hass.data
         assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
         assert mock_hass.data[DOMAIN][mock_config_entry.entry_id] == mock_coordinator
-        
+
         # Verify coordinator was created with correct config
-        mock_coordinator_class.assert_called_once_with(mock_hass, mock_config_entry.data)
-        
+        mock_coordinator_class.assert_called_once_with(
+            mock_hass, mock_config_entry.data
+        )
+
         # Verify server was started
         mock_coordinator.async_start_server.assert_called_once()
-        
+
         # Verify platforms were set up
         mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
             mock_config_entry, PLATFORMS
@@ -88,10 +91,10 @@ async def test_async_setup_entry_server_start_fails(mock_hass, mock_config_entry
             side_effect=Exception("Failed to start server")
         )
         mock_coordinator_class.return_value = mock_coordinator
-        
+
         with pytest.raises(ConfigEntryNotReady):
             await async_setup_entry(mock_hass, mock_config_entry)
-        
+
         # Data should be set up even if server fails
         assert DOMAIN in mock_hass.data
         assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
@@ -103,19 +106,19 @@ async def test_async_unload_entry(mock_hass, mock_config_entry):
     mock_coordinator = MagicMock()
     mock_coordinator.async_stop_server = AsyncMock()
     mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: mock_coordinator}
-    
+
     result = await async_unload_entry(mock_hass, mock_config_entry)
-    
+
     assert result is True
-    
+
     # Verify platforms were unloaded
     mock_hass.config_entries.async_unload_platforms.assert_called_once_with(
         mock_config_entry, PLATFORMS
     )
-    
+
     # Verify server was stopped
     mock_coordinator.async_stop_server.assert_called_once()
-    
+
     # Verify coordinator was removed from hass.data
     assert mock_config_entry.entry_id not in mock_hass.data[DOMAIN]
 
@@ -125,17 +128,17 @@ async def test_async_unload_entry_platforms_fail(mock_hass, mock_config_entry):
     mock_coordinator = MagicMock()
     mock_coordinator.async_stop_server = AsyncMock()
     mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: mock_coordinator}
-    
+
     # Make platform unload fail
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
-    
+
     result = await async_unload_entry(mock_hass, mock_config_entry)
-    
+
     assert result is False
-    
+
     # Verify server was NOT stopped since platforms failed to unload
     mock_coordinator.async_stop_server.assert_not_called()
-    
+
     # Verify coordinator was NOT removed from hass.data
     assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
 
@@ -150,7 +153,7 @@ async def test_multiple_entries(mock_hass):
         "ssl_key": "/ssl/privkey.pem",
         "charge_point_id": "DE*BMW*TEST1",
     }
-    
+
     entry2 = MagicMock(spec=ConfigEntry)
     entry2.entry_id = "entry_2"
     entry2.data = {
@@ -159,7 +162,7 @@ async def test_multiple_entries(mock_hass):
         "ssl_key": "/ssl/privkey.pem",
         "charge_point_id": "DE*BMW*TEST2",
     }
-    
+
     with patch(
         "custom_components.bmw_wallbox.BMWWallboxCoordinator"
     ) as mock_coordinator_class:
@@ -167,13 +170,13 @@ async def test_multiple_entries(mock_hass):
         mock_coordinator1.async_start_server = AsyncMock()
         mock_coordinator2 = MagicMock()
         mock_coordinator2.async_start_server = AsyncMock()
-        
+
         mock_coordinator_class.side_effect = [mock_coordinator1, mock_coordinator2]
-        
+
         # Set up both entries
         result1 = await async_setup_entry(mock_hass, entry1)
         result2 = await async_setup_entry(mock_hass, entry2)
-        
+
         assert result1 is True
         assert result2 is True
         assert len(mock_hass.data[DOMAIN]) == 2

@@ -1,7 +1,7 @@
 """Test BMW Wallbox coordinator."""
-import asyncio
+
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -56,6 +56,7 @@ def charge_point(coordinator, mock_websocket):
 # COORDINATOR INITIALIZATION TESTS
 # ==============================================================================
 
+
 async def test_coordinator_initialization(coordinator):
     """Test coordinator initializes with correct defaults."""
     assert coordinator.config["port"] == 9000
@@ -70,9 +71,9 @@ async def test_coordinator_initialization(coordinator):
 async def test_coordinator_async_update_data(coordinator):
     """Test coordinator data update method."""
     coordinator.data["power"] = 5000.0
-    
+
     result = await coordinator._async_update_data()
-    
+
     assert result == coordinator.data
     assert result["power"] == 5000.0
 
@@ -80,6 +81,7 @@ async def test_coordinator_async_update_data(coordinator):
 # ==============================================================================
 # OCPP MESSAGE HANDLER TESTS
 # ==============================================================================
+
 
 async def test_boot_notification_handler(charge_point):
     """Test BootNotification handler."""
@@ -89,12 +91,11 @@ async def test_boot_notification_handler(charge_point):
         "serial_number": "TEST123",
         "firmware_version": "1.0.0",
     }
-    
+
     response = await charge_point.on_boot_notification(
-        charging_station=charging_station,
-        reason="PowerUp"
+        charging_station=charging_station, reason="PowerUp"
     )
-    
+
     assert response.status == "Accepted"
     assert charge_point.coordinator.device_info["model"] == "EIAW-E22KTSE6B04"
     assert charge_point.coordinator.device_info["vendor"] == "BMW"
@@ -104,13 +105,13 @@ async def test_boot_notification_handler(charge_point):
 
 async def test_status_notification_handler(charge_point):
     """Test StatusNotification handler."""
-    response = await charge_point.on_status_notification(
+    _response = await charge_point.on_status_notification(
         timestamp=datetime.utcnow().isoformat(),
         connector_status="Charging",
         evse_id=1,
-        connector_id=1
+        connector_id=1,
     )
-    
+
     assert charge_point.coordinator.data["connector_status"] == "Charging"
     assert charge_point.coordinator.data["evse_id"] == 1
     assert charge_point.coordinator.data["connector_id"] == 1
@@ -119,7 +120,7 @@ async def test_status_notification_handler(charge_point):
 async def test_heartbeat_handler(charge_point):
     """Test Heartbeat handler."""
     response = await charge_point.on_heartbeat()
-    
+
     assert charge_point.coordinator.data["connected"] is True
     assert charge_point.coordinator.data["last_heartbeat"] is not None
     assert response.current_time is not None
@@ -143,12 +144,12 @@ async def test_meter_values_handler(charge_point):
                     "phase": None,
                     "context": "Sample.Periodic",
                 },
-            ]
+            ],
         }
     ]
-    
-    response = await charge_point.on_meter_values(evse_id=1, meter_value=meter_value)
-    
+
+    _response = await charge_point.on_meter_values(evse_id=1, meter_value=meter_value)
+
     assert charge_point.coordinator.data["power"] == 7200.0
     assert charge_point.coordinator.data["energy_total"] == 25.5  # Converted to kWh
 
@@ -162,12 +163,12 @@ async def test_meter_values_current_phases(charge_point):
                 {"measurand": "Current.Import", "value": "10.5", "phase": "L1-N"},
                 {"measurand": "Current.Import", "value": "11.2", "phase": "L2-N"},
                 {"measurand": "Current.Import", "value": "9.8", "phase": "L3-N"},
-            ]
+            ],
         }
     ]
-    
+
     await charge_point.on_meter_values(evse_id=1, meter_value=meter_value)
-    
+
     assert charge_point.coordinator.data["current_l1"] == 10.5
     assert charge_point.coordinator.data["current_l2"] == 11.2
     assert charge_point.coordinator.data["current_l3"] == 9.8
@@ -182,12 +183,12 @@ async def test_meter_values_voltage_phases(charge_point):
                 {"measurand": "Voltage", "value": "230", "phase": "L1-N"},
                 {"measurand": "Voltage", "value": "231", "phase": "L2-N"},
                 {"measurand": "Voltage", "value": "229", "phase": "L3-N"},
-            ]
+            ],
         }
     ]
-    
+
     await charge_point.on_meter_values(evse_id=1, meter_value=meter_value)
-    
+
     assert charge_point.coordinator.data["voltage_l1"] == 230.0
     assert charge_point.coordinator.data["voltage_l2"] == 231.0
     assert charge_point.coordinator.data["voltage_l3"] == 229.0
@@ -199,7 +200,7 @@ async def test_transaction_event_handler(charge_point):
         "transaction_id": "test-tx-123",
         "charging_state": "Charging",
     }
-    
+
     meter_value = [
         {
             "sampled_value": [
@@ -207,8 +208,8 @@ async def test_transaction_event_handler(charge_point):
             ]
         }
     ]
-    
-    response = await charge_point.on_transaction_event(
+
+    _response = await charge_point.on_transaction_event(
         event_type="Updated",
         timestamp=datetime.utcnow().isoformat(),
         trigger_reason="MeterValuePeriodic",
@@ -216,7 +217,7 @@ async def test_transaction_event_handler(charge_point):
         transaction_info=transaction_info,
         meter_value=meter_value,
     )
-    
+
     assert charge_point.coordinator.data["transaction_id"] == "test-tx-123"
     assert charge_point.coordinator.data["charging_state"] == "Charging"
     assert charge_point.coordinator.data["power"] == 7000.0
@@ -231,7 +232,7 @@ async def test_transaction_event_calculates_current(charge_point):
         "transaction_id": "test-tx-123",
         "charging_state": "Charging",
     }
-    
+
     meter_value = [
         {
             "sampled_value": [
@@ -239,12 +240,12 @@ async def test_transaction_event_calculates_current(charge_point):
             ]
         }
     ]
-    
+
     # Initialize with no current but voltage will be assumed as 230V
     charge_point.coordinator.data["current"] = 0
     charge_point.coordinator.data["voltage"] = 0
     charge_point.coordinator.data["phases_used"] = 1
-    
+
     await charge_point.on_transaction_event(
         event_type="Updated",
         timestamp=datetime.utcnow().isoformat(),
@@ -253,7 +254,7 @@ async def test_transaction_event_calculates_current(charge_point):
         transaction_info=transaction_info,
         meter_value=meter_value,
     )
-    
+
     # Should calculate: I = 7200W / 230V ≈ 31.3A
     assert charge_point.coordinator.data["current"] is not None
     assert 31 <= charge_point.coordinator.data["current"] <= 32
@@ -265,9 +266,9 @@ async def test_transaction_event_derives_connector_status(charge_point):
         "transaction_id": "test-tx-123",
         "charging_state": "Charging",
     }
-    
+
     charge_point.coordinator.data["connector_status"] = "Unknown"
-    
+
     await charge_point.on_transaction_event(
         event_type="Updated",
         timestamp=datetime.utcnow().isoformat(),
@@ -275,7 +276,7 @@ async def test_transaction_event_derives_connector_status(charge_point):
         seq_no=1,
         transaction_info=transaction_info,
     )
-    
+
     assert charge_point.coordinator.data["connector_status"] == "Occupied"
 
 
@@ -287,7 +288,7 @@ async def test_notify_report_handler(charge_point):
         generated_at=datetime.utcnow().isoformat(),
         report_data=[],
     )
-    
+
     # Should not raise exception
     assert response is not None
 
@@ -298,7 +299,7 @@ async def test_security_event_notification_handler(charge_point):
         type="SettingSystemTime",
         timestamp=datetime.utcnow().isoformat(),
     )
-    
+
     # Should not raise exception
     assert response is not None
 
@@ -307,14 +308,15 @@ async def test_security_event_notification_handler(charge_point):
 # COMMAND TESTS
 # ==============================================================================
 
+
 async def test_async_start_charging_already_charging(coordinator):
     """Test start charging when already charging."""
     coordinator.charge_point = MagicMock()
     coordinator.data["charging_state"] = "Charging"
     coordinator.data["power"] = 7000.0
-    
+
     result = await coordinator.async_start_charging()
-    
+
     assert result["success"] is True
     assert result["action"] == "already_charging"
 
@@ -325,14 +327,14 @@ async def test_async_start_charging_with_transaction(coordinator):
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["charging_state"] = "SuspendedEVSE"
     coordinator.data["power"] = 0
-    
+
     # Mock the resume method
     coordinator.async_resume_charging = AsyncMock(
         return_value={"success": True, "message": "Resumed"}
     )
-    
+
     result = await coordinator.async_start_charging()
-    
+
     assert result["success"] is True
     assert result["action"] == "resumed"
     coordinator.async_resume_charging.assert_called_once()
@@ -342,18 +344,18 @@ async def test_async_start_charging_new_transaction(coordinator):
     """Test start charging creates new transaction."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     # Mock the response
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_response.transaction_id = "new-tx-456"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = None
-    
+
     result = await coordinator.async_start_charging()
-    
+
     assert result["success"] is True
     assert result["action"] == "started"
     assert coordinator.current_transaction_id == "new-tx-456"
@@ -362,9 +364,9 @@ async def test_async_start_charging_new_transaction(coordinator):
 async def test_async_start_charging_no_wallbox(coordinator):
     """Test start charging fails when wallbox not connected."""
     coordinator.charge_point = None
-    
+
     result = await coordinator.async_start_charging()
-    
+
     assert result["success"] is False
     assert "not connected" in result["message"]
 
@@ -373,17 +375,17 @@ async def test_async_pause_charging(coordinator):
     """Test pause charging."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 7000.0
-    
+
     result = await coordinator.async_pause_charging()
-    
+
     assert result["success"] is True
     assert "paused" in result["message"].lower()
 
@@ -393,9 +395,9 @@ async def test_async_pause_charging_already_paused(coordinator):
     coordinator.charge_point = MagicMock()
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 0
-    
+
     result = await coordinator.async_pause_charging()
-    
+
     assert result["success"] is True
     assert "already paused" in result["message"].lower()
 
@@ -404,16 +406,16 @@ async def test_async_resume_charging(coordinator):
     """Test resume charging."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
-    
+
     result = await coordinator.async_resume_charging(32.0)
-    
+
     assert result["success"] is True
     assert "resumed" in result["message"].lower()
 
@@ -423,9 +425,9 @@ async def test_async_stop_charging(coordinator):
     coordinator.async_pause_charging = AsyncMock(
         return_value={"success": True, "message": "Paused"}
     )
-    
+
     result = await coordinator.async_stop_charging()
-    
+
     assert result["success"] is True
     coordinator.async_pause_charging.assert_called_once()
 
@@ -434,16 +436,16 @@ async def test_async_reset_wallbox(coordinator):
     """Test reset wallbox."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
-    
+
     result = await coordinator.async_reset_wallbox()
-    
+
     assert result["success"] is True
     assert "reset" in result["message"].lower() or "reboot" in result["message"].lower()
     assert coordinator.current_transaction_id is None
@@ -453,16 +455,16 @@ async def test_async_set_current_limit(coordinator):
     """Test set current limit."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
-    
+
     result = await coordinator.async_set_current_limit(16.0)
-    
+
     assert result is True
 
 
@@ -470,9 +472,9 @@ async def test_async_set_current_limit_no_transaction(coordinator):
     """Test set current limit fails without transaction."""
     coordinator.charge_point = MagicMock()
     coordinator.current_transaction_id = None
-    
+
     result = await coordinator.async_set_current_limit(16.0)
-    
+
     assert result is False
 
 
@@ -480,15 +482,15 @@ async def test_async_trigger_meter_values(coordinator):
     """Test trigger meter values."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.status = "Accepted"
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
-    
+
     result = await coordinator.async_trigger_meter_values()
-    
+
     assert result is True
 
 
@@ -496,15 +498,15 @@ async def test_async_set_led_brightness(coordinator):
     """Test set LED brightness."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.set_variable_result = [{"attribute_status": "Accepted"}]
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
-    
+
     result = await coordinator.async_set_led_brightness(50)
-    
+
     assert result is True
 
 
@@ -512,17 +514,17 @@ async def test_async_set_led_brightness_clamps_value(coordinator):
     """Test LED brightness is clamped to 0-100 range."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock()
-    
+
     mock_response = MagicMock()
     mock_response.set_variable_result = [{"attribute_status": "Accepted"}]
     mock_charge_point.call.return_value = mock_response
-    
+
     coordinator.charge_point = mock_charge_point
-    
+
     # Test clamping
     result = await coordinator.async_set_led_brightness(150)  # Should clamp to 100
     assert result is True
-    
+
     result = await coordinator.async_set_led_brightness(-10)  # Should clamp to 0
     assert result is True
 
@@ -531,16 +533,17 @@ async def test_async_set_led_brightness_clamps_value(coordinator):
 # ERROR HANDLING TESTS
 # ==============================================================================
 
+
 async def test_start_charging_timeout(coordinator):
     """Test start charging handles timeout."""
     mock_charge_point = MagicMock()
-    mock_charge_point.call = AsyncMock(side_effect=asyncio.TimeoutError())
-    
+    mock_charge_point.call = AsyncMock(side_effect=TimeoutError())
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = None
-    
+
     result = await coordinator.async_start_charging()
-    
+
     assert result["success"] is False
     assert "timeout" in result["message"].lower()
 
@@ -548,14 +551,14 @@ async def test_start_charging_timeout(coordinator):
 async def test_pause_charging_timeout(coordinator):
     """Test pause charging handles timeout."""
     mock_charge_point = MagicMock()
-    mock_charge_point.call = AsyncMock(side_effect=asyncio.TimeoutError())
-    
+    mock_charge_point.call = AsyncMock(side_effect=TimeoutError())
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 7000.0
-    
+
     result = await coordinator.async_pause_charging()
-    
+
     assert result["success"] is False
     assert "timeout" in result["message"].lower()
 
@@ -563,13 +566,13 @@ async def test_pause_charging_timeout(coordinator):
 async def test_resume_charging_timeout(coordinator):
     """Test resume charging handles timeout."""
     mock_charge_point = MagicMock()
-    mock_charge_point.call = AsyncMock(side_effect=asyncio.TimeoutError())
-    
+    mock_charge_point.call = AsyncMock(side_effect=TimeoutError())
+
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
-    
+
     result = await coordinator.async_resume_charging(32.0)
-    
+
     assert result["success"] is False
     assert "timeout" in result["message"].lower()
 
@@ -578,9 +581,9 @@ async def test_trigger_meter_values_error(coordinator):
     """Test trigger meter values handles errors."""
     mock_charge_point = MagicMock()
     mock_charge_point.call = AsyncMock(side_effect=Exception("Test error"))
-    
+
     coordinator.charge_point = mock_charge_point
-    
+
     result = await coordinator.async_trigger_meter_values()
-    
+
     assert result is False

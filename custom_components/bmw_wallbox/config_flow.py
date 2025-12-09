@@ -1,16 +1,16 @@
 """Config flow for BMW Wallbox integration."""
+
 from __future__ import annotations
 
 import logging
 import os
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+import voluptuous as vol
 
 from .const import (
     CONF_CHARGE_POINT_ID,
@@ -42,18 +42,18 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    
+
     # Validate port range
     if not 1 <= data[CONF_PORT] <= 65535:
         raise InvalidPort
-    
+
     # Validate SSL certificate files exist
     if not os.path.isfile(data[CONF_SSL_CERT]):
         raise InvalidSSLCert(f"Certificate file not found: {data[CONF_SSL_CERT]}")
-    
+
     if not os.path.isfile(data[CONF_SSL_KEY]):
         raise InvalidSSLKey(f"Key file not found: {data[CONF_SSL_KEY]}")
-    
+
     # Return info to store in the config entry
     return {
         "title": f"BMW Wallbox ({data[CONF_CHARGE_POINT_ID]})",
@@ -71,7 +71,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
-        
+
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
@@ -88,7 +88,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Check if already configured
                 await self.async_set_unique_id(info["unique_id"])
                 self._abort_if_unique_id_configured()
-                
+
                 return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(

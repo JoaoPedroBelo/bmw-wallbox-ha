@@ -1,4 +1,5 @@
 """Binary sensor platform for BMW Wallbox."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -12,11 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    BINARY_SENSOR_CHARGING,
-    BINARY_SENSOR_CONNECTED,
-    DOMAIN,
-)
+from .const import BINARY_SENSOR_CHARGING, BINARY_SENSOR_CONNECTED, DOMAIN
 from .coordinator import BMWWallboxCoordinator
 
 
@@ -27,7 +24,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up BMW Wallbox binary sensors."""
     coordinator: BMWWallboxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
+
     async_add_entities(
         [
             # Connection status should be first (most important!)
@@ -93,7 +90,7 @@ class BMWWallboxConnectedBinarySensor(BMWWallboxBinarySensorBase):
         if last_heartbeat and isinstance(last_heartbeat, datetime):
             return (datetime.utcnow() - last_heartbeat) < timedelta(seconds=30)
         return self.coordinator.data.get("connected", False)
-    
+
     @property
     def extra_state_attributes(self) -> dict:
         """Return extra attributes."""

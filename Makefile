@@ -82,3 +82,4 @@ fix:
 # Remove trailing whitespace and fix blank lines
 clean-whitespace: format
 	@echo "✓ Whitespace cleaned by ruff format!"
+

@@ -26,6 +26,19 @@ target-version = "py311"
 # Same as Home Assistant core
 line-length = 88
 
+# Exclude patterns
+exclude = [
+    ".git",
+    ".github",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+    "build",
+    "dist",
+]
+
 # Enable specific rule sets following Home Assistant standards
 lint.select = [
     "A",     # flake8-builtins
@@ -56,29 +69,28 @@ lint.ignore = [
     "S101",    # use of assert (required for tests)
     "PLR2004", # magic value comparison
     "PLR0913", # too many arguments
+    "PLR0912", # too many branches
+    "PLR0915", # too many statements
     "COM812",  # trailing comma (conflicts with formatter)
     "S105",    # possible hardcoded password (false positives in tests)
     "S106",    # possible hardcoded password (false positives in tests)
     "S108",    # probable insecure usage of temp file/directory
+    "S104",    # binding to all interfaces (needed for OCPP server)
+    "ARG001",  # unused function argument (pytest fixtures)
     "ARG002",  # unused method argument (common in event handlers)
+    "N813",    # camelcase imported as lowercase (OCPP patterns)
+    "N818",    # exception naming (our names are clear)
+    "A002",    # shadowing builtin (OCPP spec uses 'type')
+    "B007",    # loop control variable not used (common pattern)
+    "RUF006",  # store asyncio.create_task reference (not always needed)
+    "RUF012",  # mutable class attributes (intentional constants)
+    "PLC0415", # import not at top-level (lazy imports)
+    "PLR1714", # merge multiple comparisons (readability)
 ]
 
 # Additional blank line rules
 [tool.ruff.lint.pycodestyle]
 max-line-length = 88
-
-# Exclude patterns
-exclude = [
-    ".git",
-    ".github",
-    ".venv",
-    "venv",
-    "__pycache__",
-    "*.pyc",
-    ".pytest_cache",
-    "build",
-    "dist",
-]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests can use magic values, asserts, and relative imports
@@ -180,3 +192,4 @@ module = "tests.*"
 disallow_untyped_calls = false
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+

@@ -1,4 +1,5 @@
 """Sensor platform for BMW Wallbox - ALL USEFUL SENSORS ENABLED."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,8 +23,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     SENSOR_ENERGY_DAILY,
-    SENSOR_ENERGY_WEEKLY,
     SENSOR_ENERGY_MONTHLY,
+    SENSOR_ENERGY_WEEKLY,
     SENSOR_ENERGY_YEARLY,
 )
 from .coordinator import BMWWallboxCoordinator
@@ -36,33 +37,28 @@ async def async_setup_entry(
 ) -> None:
     """Set up BMW Wallbox sensors - ALL USEFUL SENSORS ENABLED!"""
     coordinator: BMWWallboxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
+
     async_add_entities(
         [
             # === MAIN STATUS SENSORS (MOST IMPORTANT - SHOWN FIRST!) ===
             BMWWallboxStatusSensor(coordinator, entry),
             BMWWallboxStateSensor(coordinator, entry),
-            
             # === ENERGY & POWER (FOR CHARGING MONITORING) ===
             BMWWallboxPowerSensor(coordinator, entry),
-            BMWWallboxEnergyTotalSensor(coordinator, entry),      # For Energy Dashboard
-            BMWWallboxEnergySessionSensor(coordinator, entry),     # Per-session tracking
-            
+            BMWWallboxEnergyTotalSensor(coordinator, entry),  # For Energy Dashboard
+            BMWWallboxEnergySessionSensor(coordinator, entry),  # Per-session tracking
             # === PERIOD-BASED ENERGY (AUTO-RESET) ===
             BMWWallboxEnergyDailySensor(coordinator, entry),
             BMWWallboxEnergyWeeklySensor(coordinator, entry),
             BMWWallboxEnergyMonthlySensor(coordinator, entry),
             BMWWallboxEnergyYearlySensor(coordinator, entry),
-            
             # === ELECTRICAL MEASUREMENTS ===
             BMWWallboxCurrentSensor(coordinator, entry),
             BMWWallboxVoltageSensor(coordinator, entry),
-            
             # === CONNECTION & TRANSACTION INFO ===
             BMWWallboxConnectorStatusSensor(coordinator, entry),
             BMWWallboxTransactionIDSensor(coordinator, entry),
             BMWWallboxStoppedReasonSensor(coordinator, entry),
-            
             # === DIAGNOSTIC INFO (TECHNICAL DETAILS) ===
             BMWWallboxEventTypeSensor(coordinator, entry),
             BMWWallboxTriggerReasonSensor(coordinator, entry),
@@ -90,7 +86,9 @@ class BMWWallboxSensorBase(CoordinatorEntity, SensorEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["charge_point_id"])},
             "name": "BMW Wallbox",
-            "manufacturer": coordinator.device_info.get("vendor", "BMW (Delta Electronics)"),
+            "manufacturer": coordinator.device_info.get(
+                "vendor", "BMW (Delta Electronics)"
+            ),
             "model": coordinator.device_info.get("model", "EIAW-E22KTSE6B04"),
             "sw_version": coordinator.device_info.get("firmware_version"),
             "serial_number": coordinator.device_info.get("serial_number"),
@@ -100,6 +98,7 @@ class BMWWallboxSensorBase(CoordinatorEntity, SensorEntity):
 # ============================================================================
 # USER-FRIENDLY STATUS SENSOR (the main one users will see!)
 # ============================================================================
+
 
 class BMWWallboxStatusSensor(BMWWallboxSensorBase):
     """User-friendly status sensor showing clear charging status."""
@@ -116,31 +115,31 @@ class BMWWallboxStatusSensor(BMWWallboxSensorBase):
         charging_state = self.coordinator.data.get("charging_state")
         power = self.coordinator.data.get("power", 0)
         transaction_id = self.coordinator.data.get("transaction_id")
-        
+
         # If wallbox is offline, show that clearly
         if not wallbox_connected:
             return "Wallbox Offline"
-        
+
         if not transaction_id:
             return "Ready"
-        
+
         if charging_state == "Charging" or (power and power > 100):
             return "Charging ⚡"
-        
+
         if charging_state == "SuspendedEV":
             return "Car Paused"
-        
+
         if charging_state == "SuspendedEVSE":
             return "Paused"
-        
+
         if charging_state == "EVConnected":
             if power == 0:
                 return "Paused"
             return "Connected"
-        
+
         if charging_state == "Idle":
             return "Ready"
-        
+
         return charging_state or "Unknown"
 
     @property
@@ -149,17 +148,17 @@ class BMWWallboxStatusSensor(BMWWallboxSensorBase):
         status = self.native_value
         if status == "Charging ⚡":
             return "mdi:battery-charging"
-        elif status == "Paused":
+        if status == "Paused":
             return "mdi:pause-circle"
-        elif status == "Disconnected":
+        if status == "Disconnected":
             return "mdi:power-plug-off"
-        elif status == "Wallbox Offline":
+        if status == "Wallbox Offline":
             return "mdi:lan-disconnect"
-        elif status == "Ready":
+        if status == "Ready":
             return "mdi:power-plug"
-        elif status == "Connected":
+        if status == "Connected":
             return "mdi:car-electric"
-        elif status == "Car Paused":
+        if status == "Car Paused":
             return "mdi:car-clock"
         return "mdi:ev-station"
 
@@ -177,6 +176,7 @@ class BMWWallboxStatusSensor(BMWWallboxSensorBase):
 # ============================================================================
 # METER VALUE SENSORS (from Power.Active.Import & Energy.Active.Import.Register)
 # ============================================================================
+
 
 class BMWWallboxPowerSensor(BMWWallboxSensorBase):
     """Current power draw sensor (W)."""
@@ -197,7 +197,7 @@ class BMWWallboxPowerSensor(BMWWallboxSensorBase):
 
 class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase):
     """Cumulative energy sensor (kWh) - Works with Home Assistant Energy Dashboard.
-    
+
     This sensor accumulates energy across ALL charging sessions and never resets.
     Perfect for tracking lifetime energy consumption in the Energy Dashboard.
     """
@@ -253,7 +253,7 @@ class BMWWallboxEnergyDailySensor(BMWWallboxSensorBase):
         """Return daily energy in kWh."""
         # Daily energy from period counter (accumulated from completed sessions)
         return self.coordinator.data.get("energy_daily", 0.0)
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
@@ -279,7 +279,7 @@ class BMWWallboxEnergyWeeklySensor(BMWWallboxSensorBase):
         """Return weekly energy in kWh."""
         # Weekly energy from period counter (accumulated from completed sessions)
         return self.coordinator.data.get("energy_weekly", 0.0)
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
@@ -305,7 +305,7 @@ class BMWWallboxEnergyMonthlySensor(BMWWallboxSensorBase):
         """Return monthly energy in kWh."""
         # Monthly energy from period counter (accumulated from completed sessions)
         return self.coordinator.data.get("energy_monthly", 0.0)
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
@@ -331,7 +331,7 @@ class BMWWallboxEnergyYearlySensor(BMWWallboxSensorBase):
         """Return yearly energy in kWh."""
         # Yearly energy from period counter (accumulated from completed sessions)
         return self.coordinator.data.get("energy_yearly", 0.0)
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
@@ -359,7 +359,7 @@ class BMWWallboxCurrentSensor(BMWWallboxSensorBase):
         if value is None or value == 0:
             return None
         return value
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
@@ -392,7 +392,7 @@ class BMWWallboxVoltageSensor(BMWWallboxSensorBase):
         if value is None or value == 0:
             return None
         return value
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
@@ -410,6 +410,7 @@ class BMWWallboxVoltageSensor(BMWWallboxSensorBase):
 # ============================================================================
 # TRANSACTION INFO SENSORS (from TransactionEvent)
 # ============================================================================
+
 
 class BMWWallboxStateSensor(BMWWallboxSensorBase):
     """OCPP transaction state sensor - shows the raw OCPP charging state."""
@@ -439,7 +440,7 @@ class BMWWallboxStateSensor(BMWWallboxSensorBase):
         # Show "Offline" if wallbox is disconnected
         if not self.coordinator.data.get("connected", False):
             return "Wallbox Offline"
-        
+
         raw_state = self.coordinator.data.get("charging_state")
         return self.STATE_MAP.get(raw_state, raw_state)
 
@@ -449,13 +450,13 @@ class BMWWallboxStateSensor(BMWWallboxSensorBase):
         state = self.native_value
         if state == "Charging":
             return "mdi:battery-charging"
-        elif state in ["Paused", "Car Paused"]:
+        if state in ["Paused", "Car Paused"]:
             return "mdi:pause-circle"
-        elif state == "Connected":
+        if state == "Connected":
             return "mdi:power-plug"
-        elif state == "Idle":
+        if state == "Idle":
             return "mdi:sleep"
-        elif state == "Faulted":
+        if state == "Faulted":
             return "mdi:alert-circle"
         return "mdi:ev-station"
 
@@ -482,21 +483,26 @@ class BMWWallboxConnectorStatusSensor(BMWWallboxSensorBase):
         # Don't show "Unknown" - derive from charging state if needed
         if status == "Unknown":
             charging_state = self.coordinator.data.get("charging_state")
-            if charging_state in ["Charging", "SuspendedEV", "SuspendedEVSE", "EVConnected"]:
+            if charging_state in [
+                "Charging",
+                "SuspendedEV",
+                "SuspendedEVSE",
+                "EVConnected",
+            ]:
                 return "Occupied"
-            elif charging_state == "Available":
+            if charging_state == "Available":
                 return "Available"
         return status
-    
+
     @property
     def icon(self) -> str:
         """Return dynamic icon based on status."""
         status = self.native_value
         if status == "Occupied":
             return "mdi:ev-plug-type2"
-        elif status == "Available":
+        if status == "Available":
             return "mdi:power-plug"
-        elif status == "Faulted":
+        if status == "Faulted":
             return "mdi:alert-circle"
         return "mdi:help-circle"
 
@@ -531,6 +537,7 @@ class BMWWallboxStoppedReasonSensor(BMWWallboxSensorBase):
 # EVENT INFO SENSORS (from TransactionEvent metadata)
 # ============================================================================
 
+
 class BMWWallboxEventTypeSensor(BMWWallboxSensorBase):
     """Event type sensor (Started, Updated, Ended)."""
 
@@ -560,6 +567,7 @@ class BMWWallboxTriggerReasonSensor(BMWWallboxSensorBase):
 # ============================================================================
 # CONNECTION INFO SENSORS (from TransactionEvent - id_token, evse, connector)
 # ============================================================================
+
 
 class BMWWallboxIDTokenSensor(BMWWallboxSensorBase):
     """ID Token sensor (RFID card identifier)."""
