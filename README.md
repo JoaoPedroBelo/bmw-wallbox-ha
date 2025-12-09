@@ -1,8 +1,14 @@
 # BMW Wallbox Home Assistant Integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/tests.yml/badge.svg)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/tests.yml)
+[![Built with Cursor](https://img.shields.io/badge/✨%20Built%20with-Cursor-blueviolet?style=for-the-badge)](https://cursor.sh)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://github.com/hacs/integration)
+[![Release](https://img.shields.io/github/v/release/JoaoPedroBelo/bmw-wallbox-ha?style=for-the-badge)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/releases)
+[![License](https://img.shields.io/github/license/JoaoPedroBelo/bmw-wallbox-ha?style=for-the-badge)](LICENSE)
+[![Maintainer](https://img.shields.io/badge/Maintainer-%40JoaoPedroBelo-blue?style=for-the-badge)](https://github.com/JoaoPedroBelo)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JoaoPedroBelo&repository=bmw-wallbox-ha&category=integration)
+
+---
 
 A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Delta Electronics EIAW-E22KTSE6B04) using the OCPP 2.0.1 protocol.
 
