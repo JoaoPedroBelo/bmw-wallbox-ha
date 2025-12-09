@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2024-12-09
+
+### Fixed
+- **Lint Configuration** - Fixed TOML parse error by moving `exclude` field to correct section in pyproject.toml
+- Code formatting issues (whitespace on blank lines, import sorting)
+- Added appropriate lint rule exceptions for common patterns (unused test fixtures, OCPP-specific naming conventions)
+- Unused variable warnings in test files
+
 ## [1.1.1] - 2024-12-08
 
 ### Fixed
@@ -153,4 +161,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example automations for solar charging and dynamic limiting
 
 [1.0.0]: https://github.com/JoaoPedroBelo/bmw-wallbox-ha/releases/tag/v1.0.0
-
