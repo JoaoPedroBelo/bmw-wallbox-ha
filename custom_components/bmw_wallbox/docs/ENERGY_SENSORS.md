@@ -306,3 +306,4 @@ Previously, the integration included custom daily/weekly/monthly/yearly sensors.
 - [COORDINATOR.md](COORDINATOR.md) - Coordinator API reference
 - [Home Assistant Energy Dashboard](https://www.home-assistant.io/docs/energy/)
 - [Home Assistant Utility Meter](https://www.home-assistant.io/integrations/utility_meter/)
+

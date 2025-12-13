@@ -55,10 +55,10 @@ Update your BMW wallbox OCPP settings to point to your Home Assistant:
 
 ## 📖 Documentation
 
-Comprehensive documentation is available in the [`custom_components/bmw_wallbox`](custom_components/bmw_wallbox/) folder:
+Comprehensive documentation is available in the [`docs`](custom_components/bmw_wallbox/docs/) folder:
 
-- **[Main README](custom_components/bmw_wallbox/README.md)**: Full usage guide and examples
 - **[Architecture](custom_components/bmw_wallbox/docs/ARCHITECTURE.md)**: Technical architecture overview
+- **[Energy Sensors](custom_components/bmw_wallbox/docs/ENERGY_SENSORS.md)**: Energy tracking and Utility Meter setup
 - **[OCPP Handlers](custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md)**: OCPP message handling details
 - **[Testing Guide](custom_components/bmw_wallbox/docs/TESTING.md)**: Development and testing information
 - **[Troubleshooting](custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md)**: Common issues and solutions
