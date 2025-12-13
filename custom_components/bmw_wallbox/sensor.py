@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -184,11 +185,12 @@ class BMWWallboxPowerSensor(BMWWallboxSensorBase):
         return self.coordinator.data.get("power")
 
 
-class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase):
+class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase, RestoreEntity):
     """Cumulative energy sensor (kWh) - Works with Home Assistant Energy Dashboard.
 
     This sensor accumulates energy across ALL charging sessions and never resets.
     Perfect for tracking lifetime energy consumption in the Energy Dashboard.
+    Uses RestoreEntity to persist value across Home Assistant restarts.
     """
 
     def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
@@ -198,6 +200,21 @@ class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase):
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_icon = "mdi:lightning-bolt-circle"
         self._attr_suggested_display_precision = 2
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state on startup."""
+        await super().async_added_to_hass()
+
+        # Try to restore previous state
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                restored_value = float(last_state.state)
+                # Restore to coordinator so all logic works correctly
+                self.coordinator.data["energy_cumulative"] = restored_value
+                self.coordinator.data["energy_total"] = restored_value
+            except (ValueError, TypeError):
+                pass  # Invalid state, start fresh
 
     @property
     def native_value(self) -> float | None:
