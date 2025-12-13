@@ -127,9 +127,7 @@ class WallboxChargePoint(cp):
                     session_energy_kwh = energy_wh / 1000.0
 
                     # Track session energy (same logic as TransactionEvent)
-                    last_session = self.coordinator.data.get(
-                        "last_session_energy", 0.0
-                    )
+                    last_session = self.coordinator.data.get("last_session_energy", 0.0)
                     if session_energy_kwh < last_session - 0.1:  # New session
                         _LOGGER.info(
                             "New session detected (MeterValues) - "
