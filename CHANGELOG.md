@@ -28,14 +28,14 @@ The custom period sensors had persistence issues (values reset on HA restart). H
 After updating, set up Utility Meter helpers:
 1. Go to **Settings** → **Devices & Services** → **Helpers**
 2. Click **+ Create Helper** → **Utility Meter**
-3. Select `sensor.bmw_wallbox_energy_total` as input
+3. Select `sensor.energy_total` as input
 4. Choose cycle: Daily/Weekly/Monthly/Yearly
 
 Or via YAML:
 ```yaml
 utility_meter:
   wallbox_energy_daily:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: daily
 ```
 

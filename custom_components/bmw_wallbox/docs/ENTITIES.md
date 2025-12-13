@@ -507,7 +507,7 @@ The integration provides comprehensive energy tracking with automatic period-bas
 ```yaml
 # Add to Energy Dashboard
 Settings → Dashboards → Energy → Individual Devices
-Select: sensor.bmw_wallbox_energy_total
+Select: sensor.energy_total
 ```
 
 ### Period-Based Energy Sensors

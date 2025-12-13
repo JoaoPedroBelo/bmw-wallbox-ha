@@ -21,7 +21,7 @@ For period-based tracking (daily/weekly/monthly/yearly), use Home Assistant's bu
 
 ### Technical Details
 
-- **Entity ID:** `sensor.bmw_wallbox_energy_total`
+- **Entity ID:** `sensor.energy_total`
 - **Device Class:** `energy`
 - **State Class:** `total_increasing`
 - **Unit:** kWh
@@ -54,7 +54,7 @@ Session 2: 0 → 15 kWh → total shows 40 kWh ✓
 
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **Add Consumption**
-3. Select `sensor.bmw_wallbox_energy_total`
+3. Select `sensor.energy_total`
 4. Done! Energy will now be tracked correctly
 
 ---
@@ -119,7 +119,7 @@ Use Home Assistant's **Utility Meter** helper for daily/weekly/monthly/yearly tr
 2. Click **+ Create Helper** → **Utility Meter**
 3. Configure:
    - **Name**: `Wallbox Energy Daily`
-   - **Input sensor**: `sensor.bmw_wallbox_energy_total`
+   - **Input sensor**: `sensor.energy_total`
    - **Meter reset cycle**: `Daily`
 4. Click **Submit**
 
@@ -130,16 +130,16 @@ Repeat for Weekly, Monthly, and Yearly.
 ```yaml
 utility_meter:
   wallbox_energy_daily:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: daily
   wallbox_energy_weekly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: weekly
   wallbox_energy_monthly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: monthly
   wallbox_energy_yearly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: yearly
 ```
 
@@ -152,7 +152,7 @@ utility_meter:
 ```yaml
 utility_meter:
   wallbox_energy_daily:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: daily
     tariffs:
       - peak

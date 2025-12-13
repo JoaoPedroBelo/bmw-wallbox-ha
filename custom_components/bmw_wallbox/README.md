@@ -168,7 +168,7 @@ The integration automatically provides energy sensors compatible with Home Assis
 
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **Add Consumption**
-3. Select **sensor.bmw_wallbox_energy_total**
+3. Select **sensor.energy_total**
 
 ### Period-Based Energy Tracking (Daily/Weekly/Monthly/Yearly)
 
@@ -180,7 +180,7 @@ Use Home Assistant's built-in **Utility Meter** helper to track energy by period
 2. Click **+ Create Helper** → **Utility Meter**
 3. Configure:
    - **Name**: `Wallbox Energy Daily` (or Weekly/Monthly/Yearly)
-   - **Input sensor**: `sensor.bmw_wallbox_energy_total`
+   - **Input sensor**: `sensor.energy_total`
    - **Meter reset cycle**: `Daily` (or `Weekly`/`Monthly`/`Yearly`)
 4. Click **Submit**
 
@@ -193,16 +193,16 @@ Add to your `configuration.yaml`:
 ```yaml
 utility_meter:
   wallbox_energy_daily:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: daily
   wallbox_energy_weekly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: weekly
   wallbox_energy_monthly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: monthly
   wallbox_energy_yearly:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: yearly
 ```
 
@@ -218,7 +218,7 @@ utility_meter:
 ```yaml
 utility_meter:
   wallbox_energy_daily:
-    source: sensor.bmw_wallbox_energy_total
+    source: sensor.energy_total
     cycle: daily
     tariffs:
       - peak
