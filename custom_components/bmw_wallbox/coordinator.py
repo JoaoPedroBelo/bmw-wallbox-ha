@@ -124,7 +124,28 @@ class WallboxChargePoint(cp):
                     self.coordinator.data["power"] = float(value)
                 elif measurand == "Energy.Active.Import.Register":
                     energy_wh = float(value)
-                    self.coordinator.data["energy_total"] = energy_wh / 1000.0
+                    session_energy_kwh = energy_wh / 1000.0
+
+                    # Track session energy (same logic as TransactionEvent)
+                    last_session = self.coordinator.data.get(
+                        "last_session_energy", 0.0
+                    )
+                    if session_energy_kwh < last_session - 0.1:  # New session
+                        _LOGGER.info(
+                            "New session detected (MeterValues) - "
+                            "adding %.2f kWh to cumulative",
+                            last_session,
+                        )
+                        self.coordinator.data["energy_cumulative"] += last_session
+                        self.coordinator.data["energy_daily"] += last_session
+                        self.coordinator.data["energy_weekly"] += last_session
+                        self.coordinator.data["energy_monthly"] += last_session
+                        self.coordinator.data["energy_yearly"] += last_session
+
+                    self.coordinator.data["last_session_energy"] = session_energy_kwh
+                    self.coordinator.data["energy_total"] = (
+                        self.coordinator.data["energy_cumulative"] + session_energy_kwh
+                    )
                 elif measurand == "Current.Import":
                     if phase == "L1-N":
                         self.coordinator.data["current_l1"] = float(value)

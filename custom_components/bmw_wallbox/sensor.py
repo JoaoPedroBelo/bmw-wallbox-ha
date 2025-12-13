@@ -251,8 +251,10 @@ class BMWWallboxEnergyDailySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return daily energy in kWh."""
-        # Daily energy from period counter (accumulated from completed sessions)
-        return self.coordinator.data.get("energy_daily", 0.0)
+        # Daily energy = accumulated from completed sessions + current session
+        base = self.coordinator.data.get("energy_daily", 0.0)
+        current = self.coordinator.data.get("last_session_energy", 0.0)
+        return base + current
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -277,8 +279,10 @@ class BMWWallboxEnergyWeeklySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return weekly energy in kWh."""
-        # Weekly energy from period counter (accumulated from completed sessions)
-        return self.coordinator.data.get("energy_weekly", 0.0)
+        # Weekly energy = accumulated from completed sessions + current session
+        base = self.coordinator.data.get("energy_weekly", 0.0)
+        current = self.coordinator.data.get("last_session_energy", 0.0)
+        return base + current
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -303,8 +307,10 @@ class BMWWallboxEnergyMonthlySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return monthly energy in kWh."""
-        # Monthly energy from period counter (accumulated from completed sessions)
-        return self.coordinator.data.get("energy_monthly", 0.0)
+        # Monthly energy = accumulated from completed sessions + current session
+        base = self.coordinator.data.get("energy_monthly", 0.0)
+        current = self.coordinator.data.get("last_session_energy", 0.0)
+        return base + current
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -329,8 +335,10 @@ class BMWWallboxEnergyYearlySensor(BMWWallboxSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return yearly energy in kWh."""
-        # Yearly energy from period counter (accumulated from completed sessions)
-        return self.coordinator.data.get("energy_yearly", 0.0)
+        # Yearly energy = accumulated from completed sessions + current session
+        base = self.coordinator.data.get("energy_yearly", 0.0)
+        current = self.coordinator.data.get("last_session_energy", 0.0)
+        return base + current
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
