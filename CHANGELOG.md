@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2024-12-13
+
+### Fixed
+- **Energy sensors showing 0** - Fixed issue where Energy Total and Energy Session showed 0.00 after Home Assistant restart
+- Now automatically requests meter values when wallbox connects
+- Simplified energy tracking to use wallbox values directly
+
+### Changed
+- Removed unnecessary energy accumulation logic
+- Energy sensors now display values directly from wallbox
+
 ## [1.2.0] - 2024-12-13
 
 ### Changed

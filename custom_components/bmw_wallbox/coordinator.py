@@ -123,23 +123,9 @@ class WallboxChargePoint(cp):
                 if measurand == "Power.Active.Import":
                     self.coordinator.data["power"] = float(value)
                 elif measurand == "Energy.Active.Import.Register":
-                    energy_wh = float(value)
-                    session_energy_kwh = energy_wh / 1000.0
-
-                    # Track session energy (same logic as TransactionEvent)
-                    last_session = self.coordinator.data.get("last_session_energy", 0.0)
-                    if session_energy_kwh < last_session - 0.1:  # New session
-                        _LOGGER.info(
-                            "New session detected (MeterValues) - "
-                            "adding %.2f kWh to cumulative",
-                            last_session,
-                        )
-                        self.coordinator.data["energy_cumulative"] += last_session
-
-                    self.coordinator.data["last_session_energy"] = session_energy_kwh
-                    self.coordinator.data["energy_total"] = (
-                        self.coordinator.data["energy_cumulative"] + session_energy_kwh
-                    )
+                    # Use wallbox value directly
+                    self.coordinator.data["energy_session"] = float(value)
+                    self.coordinator.data["energy_total"] = float(value) / 1000.0
                 elif measurand == "Current.Import":
                     if phase == "L1-N":
                         self.coordinator.data["current_l1"] = float(value)
@@ -261,36 +247,9 @@ class WallboxChargePoint(cp):
 
                     # Energy measurements
                     elif measurand == "Energy.Active.Import.Register":
-                        session_energy_wh = float(value)
-                        session_energy_kwh = session_energy_wh / 1000.0
-
-                        # Session tracking (existing)
-                        self.coordinator.data["energy_session"] = session_energy_wh
-
-                        # Detect session end (energy dropped significantly = new session started)
-                        last_session = self.coordinator.data.get(
-                            "last_session_energy", 0.0
-                        )
-                        if (
-                            session_energy_kwh < last_session - 0.1
-                        ):  # New session detected
-                            _LOGGER.info(
-                                "New session detected - adding %.2f kWh to cumulative",
-                                last_session,
-                            )
-                            # Add last session's final value to cumulative
-                            self.coordinator.data["energy_cumulative"] += last_session
-
-                        # Store current session energy
-                        self.coordinator.data["last_session_energy"] = (
-                            session_energy_kwh
-                        )
-
-                        # Total = cumulative + current session
-                        self.coordinator.data["energy_total"] = (
-                            self.coordinator.data["energy_cumulative"]
-                            + session_energy_kwh
-                        )
+                        # Use wallbox value directly
+                        self.coordinator.data["energy_session"] = float(value)
+                        self.coordinator.data["energy_total"] = float(value) / 1000.0
                     elif measurand == "Energy.Active.Export.Register":
                         self.coordinator.data["energy_active_export"] = (
                             float(value) / 1000
@@ -516,9 +475,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "temperature": None,
             # Configurable settings
             "led_brightness": 46,  # Default from capabilities report
-            # Cumulative energy tracking (for Energy Dashboard)
-            "energy_cumulative": 0.0,  # Never resets - true lifetime total
-            "last_session_energy": 0.0,  # Last seen session energy (to detect session end)
         }
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -554,6 +510,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             self.data["connected"] = True
             self.async_set_updated_data(self.data)
 
+            # Request meter values on connect to get current energy
+            asyncio.create_task(self._request_meter_values_on_connect())
+
             try:
                 await self.charge_point.start()
             except websockets.exceptions.ConnectionClosed:
@@ -571,6 +530,14 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         )
 
         _LOGGER.info("OCPP server started successfully")
+
+    async def _request_meter_values_on_connect(self) -> None:
+        """Request meter values after wallbox connects."""
+        # Wait for connection to stabilize
+        await asyncio.sleep(3)
+        if self.charge_point:
+            _LOGGER.info("Requesting meter values on connect...")
+            await self.async_trigger_meter_values()
 
     async def async_stop_server(self) -> None:
         """Stop the OCPP server."""

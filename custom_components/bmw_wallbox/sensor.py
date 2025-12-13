@@ -218,12 +218,8 @@ class BMWWallboxEnergySessionSensor(BMWWallboxSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        """Return energy in Wh (session energy from raw value)."""
-        # The wallbox sends Energy.Active.Import.Register in Wh for the session
-        energy_kwh = self.coordinator.data.get("energy_total")
-        if energy_kwh is not None:
-            return energy_kwh * 1000  # Convert kWh to Wh
-        return None
+        """Return energy in Wh."""
+        return self.coordinator.data.get("energy_session")
 
 
 class BMWWallboxCurrentSensor(BMWWallboxSensorBase):
