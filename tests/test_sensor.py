@@ -1,18 +1,12 @@
 """Test BMW Wallbox sensors."""
 
-from datetime import datetime
-
 from homeassistant.core import HomeAssistant
 
 from custom_components.bmw_wallbox.sensor import (
     BMWWallboxConnectorStatusSensor,
     BMWWallboxCurrentSensor,
-    BMWWallboxEnergyDailySensor,
-    BMWWallboxEnergyMonthlySensor,
     BMWWallboxEnergySessionSensor,
     BMWWallboxEnergyTotalSensor,
-    BMWWallboxEnergyWeeklySensor,
-    BMWWallboxEnergyYearlySensor,
     BMWWallboxEventTypeSensor,
     BMWWallboxIDTokenSensor,
     BMWWallboxPhasesUsedSensor,
@@ -376,144 +370,3 @@ async def test_voltage_sensor_zero_returns_none(
     mock_coordinator.data["voltage"] = 0
 
     assert sensor.native_value is None
-
-
-async def test_energy_daily_sensor(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test daily energy sensor."""
-    sensor = BMWWallboxEnergyDailySensor(mock_coordinator, mock_config_entry)
-
-    mock_coordinator.data["energy_daily"] = 5.5
-    mock_coordinator.data["last_session_energy"] = 2.3
-
-    assert sensor.native_value == 7.8  # 5.5 + 2.3
-    assert sensor.native_unit_of_measurement == "kWh"
-    assert sensor.device_class == "energy"
-    assert sensor.state_class == "total_increasing"
-
-
-async def test_energy_daily_sensor_with_last_reset(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test daily energy sensor includes last reset in attributes."""
-    sensor = BMWWallboxEnergyDailySensor(mock_coordinator, mock_config_entry)
-
-    reset_time = datetime(2025, 12, 8, 0, 0, 0)
-    mock_coordinator.data["energy_daily"] = 10.0
-    mock_coordinator.data["last_session_energy"] = 0.0
-    mock_coordinator.data["last_reset_daily"] = reset_time
-
-    attrs = sensor.extra_state_attributes
-    assert attrs["last_reset"] == "2025-12-08T00:00:00"
-
-
-async def test_energy_weekly_sensor(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test weekly energy sensor."""
-    sensor = BMWWallboxEnergyWeeklySensor(mock_coordinator, mock_config_entry)
-
-    mock_coordinator.data["energy_weekly"] = 15.2
-    mock_coordinator.data["last_session_energy"] = 3.8
-
-    assert sensor.native_value == 19.0  # 15.2 + 3.8
-    assert sensor.native_unit_of_measurement == "kWh"
-    assert sensor.device_class == "energy"
-    assert sensor.state_class == "total_increasing"
-
-
-async def test_energy_weekly_sensor_with_last_reset(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test weekly energy sensor includes last reset in attributes."""
-    sensor = BMWWallboxEnergyWeeklySensor(mock_coordinator, mock_config_entry)
-
-    reset_time = datetime(2025, 12, 8, 0, 0, 0)
-    mock_coordinator.data["energy_weekly"] = 25.0
-    mock_coordinator.data["last_session_energy"] = 0.0
-    mock_coordinator.data["last_reset_weekly"] = reset_time
-
-    attrs = sensor.extra_state_attributes
-    assert attrs["last_reset"] == "2025-12-08T00:00:00"
-
-
-async def test_energy_monthly_sensor(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test monthly energy sensor."""
-    sensor = BMWWallboxEnergyMonthlySensor(mock_coordinator, mock_config_entry)
-
-    mock_coordinator.data["energy_monthly"] = 120.5
-    mock_coordinator.data["last_session_energy"] = 5.5
-
-    assert sensor.native_value == 126.0  # 120.5 + 5.5
-    assert sensor.native_unit_of_measurement == "kWh"
-    assert sensor.device_class == "energy"
-    assert sensor.state_class == "total_increasing"
-
-
-async def test_energy_monthly_sensor_with_last_reset(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test monthly energy sensor includes last reset in attributes."""
-    sensor = BMWWallboxEnergyMonthlySensor(mock_coordinator, mock_config_entry)
-
-    reset_time = datetime(2025, 12, 1, 0, 0, 0)
-    mock_coordinator.data["energy_monthly"] = 150.0
-    mock_coordinator.data["last_session_energy"] = 0.0
-    mock_coordinator.data["last_reset_monthly"] = reset_time
-
-    attrs = sensor.extra_state_attributes
-    assert attrs["last_reset"] == "2025-12-01T00:00:00"
-
-
-async def test_energy_yearly_sensor(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test yearly energy sensor."""
-    sensor = BMWWallboxEnergyYearlySensor(mock_coordinator, mock_config_entry)
-
-    mock_coordinator.data["energy_yearly"] = 1250.0
-    mock_coordinator.data["last_session_energy"] = 12.5
-
-    assert sensor.native_value == 1262.5  # 1250.0 + 12.5
-    assert sensor.native_unit_of_measurement == "kWh"
-    assert sensor.device_class == "energy"
-    assert sensor.state_class == "total_increasing"
-
-
-async def test_energy_yearly_sensor_with_last_reset(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test yearly energy sensor includes last reset in attributes."""
-    sensor = BMWWallboxEnergyYearlySensor(mock_coordinator, mock_config_entry)
-
-    reset_time = datetime(2025, 1, 1, 0, 0, 0)
-    mock_coordinator.data["energy_yearly"] = 2000.0
-    mock_coordinator.data["last_session_energy"] = 0.0
-    mock_coordinator.data["last_reset_yearly"] = reset_time
-
-    attrs = sensor.extra_state_attributes
-    assert attrs["last_reset"] == "2025-01-01T00:00:00"
-
-
-async def test_energy_period_sensors_no_current_session(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test period energy sensors when no current session."""
-    daily_sensor = BMWWallboxEnergyDailySensor(mock_coordinator, mock_config_entry)
-    weekly_sensor = BMWWallboxEnergyWeeklySensor(mock_coordinator, mock_config_entry)
-    monthly_sensor = BMWWallboxEnergyMonthlySensor(mock_coordinator, mock_config_entry)
-    yearly_sensor = BMWWallboxEnergyYearlySensor(mock_coordinator, mock_config_entry)
-
-    mock_coordinator.data["energy_daily"] = 10.0
-    mock_coordinator.data["energy_weekly"] = 20.0
-    mock_coordinator.data["energy_monthly"] = 100.0
-    mock_coordinator.data["energy_yearly"] = 500.0
-    mock_coordinator.data["last_session_energy"] = 0.0
-
-    assert daily_sensor.native_value == 10.0
-    assert weekly_sensor.native_value == 20.0
-    assert monthly_sensor.native_value == 100.0
-    assert yearly_sensor.native_value == 500.0

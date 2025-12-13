@@ -20,13 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    DOMAIN,
-    SENSOR_ENERGY_DAILY,
-    SENSOR_ENERGY_MONTHLY,
-    SENSOR_ENERGY_WEEKLY,
-    SENSOR_ENERGY_YEARLY,
-)
+from .const import DOMAIN
 from .coordinator import BMWWallboxCoordinator
 
 
@@ -47,11 +41,6 @@ async def async_setup_entry(
             BMWWallboxPowerSensor(coordinator, entry),
             BMWWallboxEnergyTotalSensor(coordinator, entry),  # For Energy Dashboard
             BMWWallboxEnergySessionSensor(coordinator, entry),  # Per-session tracking
-            # === PERIOD-BASED ENERGY (AUTO-RESET) ===
-            BMWWallboxEnergyDailySensor(coordinator, entry),
-            BMWWallboxEnergyWeeklySensor(coordinator, entry),
-            BMWWallboxEnergyMonthlySensor(coordinator, entry),
-            BMWWallboxEnergyYearlySensor(coordinator, entry),
             # === ELECTRICAL MEASUREMENTS ===
             BMWWallboxCurrentSensor(coordinator, entry),
             BMWWallboxVoltageSensor(coordinator, entry),
@@ -235,118 +224,6 @@ class BMWWallboxEnergySessionSensor(BMWWallboxSensorBase):
         if energy_kwh is not None:
             return energy_kwh * 1000  # Convert kWh to Wh
         return None
-
-
-class BMWWallboxEnergyDailySensor(BMWWallboxSensorBase):
-    """Daily energy sensor (kWh) - resets at midnight."""
-
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, SENSOR_ENERGY_DAILY, "Energy Daily")
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_icon = "mdi:calendar-today"
-        self._attr_suggested_display_precision = 2
-
-    @property
-    def native_value(self) -> float | None:
-        """Return daily energy in kWh."""
-        # Daily energy = accumulated from completed sessions + current session
-        base = self.coordinator.data.get("energy_daily", 0.0)
-        current = self.coordinator.data.get("last_session_energy", 0.0)
-        return base + current
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        last_reset = self.coordinator.data.get("last_reset_daily")
-        return {
-            "last_reset": last_reset.isoformat() if last_reset else None,
-        }
-
-
-class BMWWallboxEnergyWeeklySensor(BMWWallboxSensorBase):
-    """Weekly energy sensor (kWh) - resets on Monday."""
-
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, SENSOR_ENERGY_WEEKLY, "Energy Weekly")
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_icon = "mdi:calendar-week"
-        self._attr_suggested_display_precision = 2
-
-    @property
-    def native_value(self) -> float | None:
-        """Return weekly energy in kWh."""
-        # Weekly energy = accumulated from completed sessions + current session
-        base = self.coordinator.data.get("energy_weekly", 0.0)
-        current = self.coordinator.data.get("last_session_energy", 0.0)
-        return base + current
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        last_reset = self.coordinator.data.get("last_reset_weekly")
-        return {
-            "last_reset": last_reset.isoformat() if last_reset else None,
-        }
-
-
-class BMWWallboxEnergyMonthlySensor(BMWWallboxSensorBase):
-    """Monthly energy sensor (kWh) - resets on 1st of month."""
-
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, SENSOR_ENERGY_MONTHLY, "Energy Monthly")
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_icon = "mdi:calendar-month"
-        self._attr_suggested_display_precision = 2
-
-    @property
-    def native_value(self) -> float | None:
-        """Return monthly energy in kWh."""
-        # Monthly energy = accumulated from completed sessions + current session
-        base = self.coordinator.data.get("energy_monthly", 0.0)
-        current = self.coordinator.data.get("last_session_energy", 0.0)
-        return base + current
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        last_reset = self.coordinator.data.get("last_reset_monthly")
-        return {
-            "last_reset": last_reset.isoformat() if last_reset else None,
-        }
-
-
-class BMWWallboxEnergyYearlySensor(BMWWallboxSensorBase):
-    """Yearly energy sensor (kWh) - resets on January 1st."""
-
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, SENSOR_ENERGY_YEARLY, "Energy Yearly")
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_icon = "mdi:calendar"
-        self._attr_suggested_display_precision = 2
-
-    @property
-    def native_value(self) -> float | None:
-        """Return yearly energy in kWh."""
-        # Yearly energy = accumulated from completed sessions + current session
-        base = self.coordinator.data.get("energy_yearly", 0.0)
-        current = self.coordinator.data.get("last_session_energy", 0.0)
-        return base + current
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        last_reset = self.coordinator.data.get("last_reset_yearly")
-        return {
-            "last_reset": last_reset.isoformat() if last_reset else None,
-        }
 
 
 class BMWWallboxCurrentSensor(BMWWallboxSensorBase):

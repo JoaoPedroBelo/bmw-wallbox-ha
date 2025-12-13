@@ -168,7 +168,89 @@ The integration automatically provides energy sensors compatible with Home Assis
 
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **Add Consumption**
-3. Select **sensor.wallbox_energy_total**
+3. Select **sensor.bmw_wallbox_energy_total**
+
+### Period-Based Energy Tracking (Daily/Weekly/Monthly/Yearly)
+
+Use Home Assistant's built-in **Utility Meter** helper to track energy by period:
+
+#### Via UI (Recommended)
+
+1. Go to **Settings** → **Devices & Services** → **Helpers**
+2. Click **+ Create Helper** → **Utility Meter**
+3. Configure:
+   - **Name**: `Wallbox Energy Daily` (or Weekly/Monthly/Yearly)
+   - **Input sensor**: `sensor.bmw_wallbox_energy_total`
+   - **Meter reset cycle**: `Daily` (or `Weekly`/`Monthly`/`Yearly`)
+4. Click **Submit**
+
+Repeat for each period you want to track.
+
+#### Via YAML
+
+Add to your `configuration.yaml`:
+
+```yaml
+utility_meter:
+  wallbox_energy_daily:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: daily
+  wallbox_energy_weekly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: weekly
+  wallbox_energy_monthly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: monthly
+  wallbox_energy_yearly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: yearly
+```
+
+#### Benefits of Utility Meter
+
+- ✅ **Automatic persistence** - survives Home Assistant restarts
+- ✅ **Customizable reset times** - choose when periods reset
+- ✅ **Native HA feature** - battle-tested and reliable
+- ✅ **Tariff support** - track peak/off-peak separately
+
+#### Example: Cost Tracking with Tariffs
+
+```yaml
+utility_meter:
+  wallbox_energy_daily:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: daily
+    tariffs:
+      - peak
+      - off_peak
+```
+
+Then automate tariff switching:
+
+```yaml
+automation:
+  - alias: "Set Peak Tariff"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: utility_meter.select_tariff
+        target:
+          entity_id: utility_meter.wallbox_energy_daily
+        data:
+          tariff: peak
+
+  - alias: "Set Off-Peak Tariff"
+    trigger:
+      - platform: time
+        at: "22:00:00"
+    action:
+      - service: utility_meter.select_tariff
+        target:
+          entity_id: utility_meter.wallbox_energy_daily
+        data:
+          tariff: off_peak
+```
 
 ## Troubleshooting
 

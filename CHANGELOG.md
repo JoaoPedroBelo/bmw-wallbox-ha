@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2024-12-13
+
+### Changed
+- **BREAKING: Removed period energy sensors** - Daily, weekly, monthly, and yearly energy sensors have been removed
+- Use Home Assistant's built-in **Utility Meter** helper instead for period-based tracking
+- This provides better persistence, customizable reset times, and tariff support
+
+### Added
+- **Documentation** - Added comprehensive guide in README for setting up Utility Meter helpers
+- Step-by-step instructions for UI and YAML configuration
+- Examples for cost tracking with peak/off-peak tariffs
+
+### Why This Change?
+The custom period sensors had persistence issues (values reset on HA restart). Home Assistant's Utility Meter is the recommended, battle-tested solution that:
+- ✅ Survives Home Assistant restarts
+- ✅ Allows custom reset times
+- ✅ Supports tariff tracking (peak/off-peak)
+- ✅ Requires no integration code maintenance
+
+### Migration Guide
+After updating, set up Utility Meter helpers:
+1. Go to **Settings** → **Devices & Services** → **Helpers**
+2. Click **+ Create Helper** → **Utility Meter**
+3. Select `sensor.bmw_wallbox_energy_total` as input
+4. Choose cycle: Daily/Weekly/Monthly/Yearly
+
+Or via YAML:
+```yaml
+utility_meter:
+  wallbox_energy_daily:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: daily
+```
+
 ## [1.1.2] - 2024-12-09
 
 ### Fixed

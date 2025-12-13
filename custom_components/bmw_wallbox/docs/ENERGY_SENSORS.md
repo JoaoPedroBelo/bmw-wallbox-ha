@@ -2,16 +2,14 @@
 
 ## Overview
 
-The integration provides 6 energy sensors for comprehensive tracking and monitoring:
+The integration provides 2 core energy sensors:
 
 | Sensor | Unit | Reset Behavior | Primary Use |
 |--------|------|---------------|-------------|
 | **Energy Total** | kWh | Never (cumulative) | Home Assistant Energy Dashboard |
 | **Energy Session** | Wh | Per charging session | Current charge monitoring |
-| **Energy Daily** | kWh | Midnight | Daily consumption patterns |
-| **Energy Weekly** | kWh | Monday midnight | Weekly trends |
-| **Energy Monthly** | kWh | 1st of month | Billing cycles |
-| **Energy Yearly** | kWh | January 1st | Annual tracking |
+
+For period-based tracking (daily/weekly/monthly/yearly), use Home Assistant's built-in **Utility Meter** helper.
 
 ---
 
@@ -59,24 +57,6 @@ Session 2: 0 → 15 kWh → total shows 40 kWh ✓
 3. Select `sensor.bmw_wallbox_energy_total`
 4. Done! Energy will now be tracked correctly
 
-### Example Lovelace Card
-
-```yaml
-type: energy-date-selection
-```
-
-Or detailed stats:
-
-```yaml
-type: statistics-graph
-entities:
-  - sensor.bmw_wallbox_energy_total
-chart_type: line
-period: day
-stat_types:
-  - change
-```
-
 ---
 
 ## Energy Session Sensor
@@ -121,116 +101,92 @@ automation:
 
 ---
 
-## Period-Based Energy Sensors
+## Period-Based Energy Tracking
 
-### Energy Daily
+Use Home Assistant's **Utility Meter** helper for daily/weekly/monthly/yearly tracking.
 
-**Resets:** Every day at midnight
+### Why Utility Meter?
 
-**Use Cases:**
-- Track daily consumption patterns
-- Compare weekday vs weekend usage
-- Monitor "did I charge today?"
-- Daily cost calculations
+- ✅ **Automatic persistence** - survives Home Assistant restarts
+- ✅ **Customizable reset times** - choose when periods reset
+- ✅ **Native HA feature** - battle-tested and reliable
+- ✅ **Tariff support** - track peak/off-peak separately
+- ✅ **No integration code needed** - less complexity, fewer bugs
 
-**Example Dashboard:**
+### Setup via UI (Recommended)
+
+1. Go to **Settings** → **Devices & Services** → **Helpers**
+2. Click **+ Create Helper** → **Utility Meter**
+3. Configure:
+   - **Name**: `Wallbox Energy Daily`
+   - **Input sensor**: `sensor.bmw_wallbox_energy_total`
+   - **Meter reset cycle**: `Daily`
+4. Click **Submit**
+
+Repeat for Weekly, Monthly, and Yearly.
+
+### Setup via YAML
 
 ```yaml
-type: custom:mini-graph-card
-entities:
-  - entity: sensor.bmw_wallbox_energy_daily
-    name: Today
-hours_to_show: 24
-line_width: 2
-points_per_hour: 4
+utility_meter:
+  wallbox_energy_daily:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: daily
+  wallbox_energy_weekly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: weekly
+  wallbox_energy_monthly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: monthly
+  wallbox_energy_yearly:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: yearly
 ```
 
-**Automation Example:**
+---
+
+## Advanced Use Cases
+
+### Cost Tracking with Tariffs
+
+```yaml
+utility_meter:
+  wallbox_energy_daily:
+    source: sensor.bmw_wallbox_energy_total
+    cycle: daily
+    tariffs:
+      - peak
+      - off_peak
+```
+
+Automate tariff switching:
 
 ```yaml
 automation:
-  - alias: "Daily Energy Report"
+  - alias: "Set Peak Tariff (7am-10pm)"
     trigger:
       - platform: time
-        at: "23:55:00"
+        at: "07:00:00"
     action:
-      - service: notify.mobile_app
+      - service: utility_meter.select_tariff
+        target:
+          entity_id: utility_meter.wallbox_energy_daily
         data:
-          message: >
-            Today's charging: {{ states('sensor.bmw_wallbox_energy_daily') }} kWh
-            Cost: €{{ (states('sensor.bmw_wallbox_energy_daily') | float * 0.25) | round(2) }}
+          tariff: peak
+
+  - alias: "Set Off-Peak Tariff (10pm-7am)"
+    trigger:
+      - platform: time
+        at: "22:00:00"
+    action:
+      - service: utility_meter.select_tariff
+        target:
+          entity_id: utility_meter.wallbox_energy_daily
+        data:
+          tariff: off_peak
 ```
 
----
-
-### Energy Weekly
-
-**Resets:** Every Monday at midnight
-
-**Use Cases:**
-- Track weekly consumption trends
-- Work week vs weekend comparison
-- Weekly budget monitoring
-- Compare week-over-week usage
-
-**Example Template Sensor:**
-
-```yaml
-template:
-  - sensor:
-      - name: "Wallbox Weekly Cost"
-        unit_of_measurement: "EUR"
-        state: >
-          {{ (states('sensor.bmw_wallbox_energy_weekly') | float * 0.25) | round(2) }}
-```
-
-**History Stats:**
-
-```yaml
-sensor:
-  - platform: history_stats
-    name: "Wallbox Charging Days This Week"
-    entity_id: binary_sensor.bmw_wallbox_charging
-    state: "on"
-    type: count
-    start: >
-      {{ as_timestamp(now()) - (now().weekday() * 86400) }}
-    end: "{{ now() }}"
-```
-
----
-
-### Energy Monthly
-
-**Resets:** 1st of every month at midnight
-
-**Use Cases:**
-- Monthly billing calculations
-- Track against monthly budgets
-- Electricity bill verification
-- Month-over-month comparison
-
-**Example Dashboard Card:**
-
-```yaml
-type: entities
-entities:
-  - entity: sensor.bmw_wallbox_energy_monthly
-    name: This Month
-    icon: mdi:calendar-month
-  - type: attribute
-    entity: sensor.bmw_wallbox_energy_monthly
-    attribute: last_reset
-    name: Since
-  - type: custom:bar-card
-    entity: sensor.bmw_wallbox_energy_monthly
-    max: 500
-    positions:
-      value: inside
-    unit_of_measurement: "kWh"
-```
-
-**Cost Tracking:**
+### Monthly Cost Template
 
 ```yaml
 template:
@@ -238,72 +194,10 @@ template:
       - name: "Wallbox Monthly Cost"
         unit_of_measurement: "EUR"
         state: >
-          {{ (states('sensor.bmw_wallbox_energy_monthly') | float * 0.25) | round(2) }}
-        attributes:
-          budget: 125
-          remaining: >
-            {{ (125 - (states('sensor.bmw_wallbox_energy_monthly') | float * 0.25)) | round(2) }}
+          {{ (states('sensor.wallbox_energy_monthly') | float * 0.25) | round(2) }}
 ```
-
----
-
-### Energy Yearly
-
-**Resets:** January 1st at midnight
-
-**Use Cases:**
-- Annual consumption tracking
-- Year-over-year comparison
-- Carbon footprint calculations
-- Long-term trend analysis
-
-**Example Carbon Footprint:**
-
-```yaml
-template:
-  - sensor:
-      - name: "Wallbox CO2 Saved Yearly"
-        unit_of_measurement: "kg"
-        icon: mdi:leaf
-        state: >
-          {# Assume 150g CO2/km for gas car, 20 kWh/100km for EV #}
-          {% set energy_kwh = states('sensor.bmw_wallbox_energy_yearly') | float %}
-          {% set km_driven = energy_kwh / 0.20 %}
-          {% set co2_saved = km_driven * 0.150 %}
-          {{ co2_saved | round(0) }}
-```
-
----
-
-## Sensor Attributes
-
-All period-based sensors include a `last_reset` attribute:
-
-```yaml
-sensor.bmw_wallbox_energy_daily:
-  state: 15.5
-  attributes:
-    last_reset: "2025-12-08T00:00:00"
-    unit_of_measurement: "kWh"
-    device_class: "energy"
-    state_class: "total_increasing"
-    friendly_name: "Energy Daily"
-    icon: "mdi:calendar-today"
-```
-
-**Accessing in Templates:**
-
-```yaml
-{{ state_attr('sensor.bmw_wallbox_energy_daily', 'last_reset') }}
-```
-
----
-
-## Advanced Use Cases
 
 ### Solar Charging Optimization
-
-Track how much solar energy is used for charging:
 
 ```yaml
 template:
@@ -311,48 +205,13 @@ template:
       - name: "Wallbox Solar Percentage Today"
         unit_of_measurement: "%"
         state: >
-          {% set wallbox = states('sensor.bmw_wallbox_energy_daily') | float %}
+          {% set wallbox = states('sensor.wallbox_energy_daily') | float %}
           {% set solar = states('sensor.solar_production_daily') | float %}
           {% if wallbox > 0 %}
             {{ (min(solar, wallbox) / wallbox * 100) | round(1) }}
           {% else %}
             0
           {% endif %}
-```
-
-### Dynamic Pricing Integration
-
-Calculate actual cost based on time-of-use pricing:
-
-```yaml
-automation:
-  - alias: "Calculate Daily Charging Cost"
-    trigger:
-      - platform: time
-        at: "23:59:00"
-    action:
-      - service: input_number.set_value
-        target:
-          entity_id: input_number.daily_charging_cost
-        data:
-          value: >
-            {% set energy = states('sensor.bmw_wallbox_energy_daily') | float %}
-            {% set peak_hours = states('sensor.charging_peak_hours_today') | float %}
-            {% set off_peak_hours = energy - peak_hours %}
-            {{ (peak_hours * 0.35 + off_peak_hours * 0.15) | round(2) }}
-```
-
-### Load Balancing Statistics
-
-```yaml
-sensor:
-  - platform: statistics
-    name: "Wallbox Average Daily Energy"
-    entity_id: sensor.bmw_wallbox_energy_daily
-    state_characteristic: mean
-    sampling_size: 30
-    max_age:
-      days: 30
 ```
 
 ### Budget Alerts
@@ -362,19 +221,27 @@ automation:
   - alias: "Monthly Energy Budget Alert"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.bmw_wallbox_energy_monthly
+        entity_id: sensor.wallbox_energy_monthly
         above: 400  # kWh
-    condition:
-      - condition: template
-        value_template: >
-          {{ now().day < 28 }}  # Not end of month yet
     action:
       - service: notify.mobile_app
         data:
           message: >
             ⚠️ Monthly charging budget exceeded!
-            Used: {{ states('sensor.bmw_wallbox_energy_monthly') }} kWh
-            Days remaining: {{ (now().replace(month=now().month+1, day=1) - now()).days }}
+            Used: {{ states('sensor.wallbox_energy_monthly') }} kWh
+```
+
+### Statistics for Averages
+
+```yaml
+sensor:
+  - platform: statistics
+    name: "Wallbox Average Daily Energy"
+    entity_id: sensor.wallbox_energy_daily
+    state_characteristic: mean
+    sampling_size: 30
+    max_age:
+      days: 30
 ```
 
 ---
@@ -390,25 +257,8 @@ automation:
 2. Wallbox not sending energy measurements
 
 **Solution:**
-```bash
-# Check coordinator data
-# In Home Assistant Developer Tools > States
-# Look for sensor.bmw_wallbox_energy_total
-# Check attributes for last_session_energy and energy_cumulative
-```
-
-### Period Sensors Not Resetting
-
-**Symptoms:** Daily/weekly/monthly sensors don't reset at expected time
-
-**Causes:**
-1. No charging activity after reset time
-2. Home Assistant restarted during reset window
-
-**Solution:**
-- Reset logic runs on every TransactionEvent
-- Charge the car at least once after the reset time
-- Check logs for "energy counter reset" messages
+- Check coordinator data in Developer Tools → States
+- Look for `last_session_energy` and `energy_cumulative` attributes
 
 ### Session Detection Issues
 
@@ -420,8 +270,7 @@ automation:
 
 **Solution:**
 - Detection threshold is 0.1 kWh to avoid false positives
-- Check coordinator logs for "New session detected" messages
-- Monitor `sensor.bmw_wallbox_energy_session` for drops
+- Check logs for "New session detected" messages
 
 ---
 
@@ -437,68 +286,16 @@ current_session = session_energy_kwh
 if current_session < last_session - 0.1:  # Energy dropped
     # New session detected!
     coordinator.data["energy_cumulative"] += last_session
-    coordinator.data["energy_daily"] += last_session
-    coordinator.data["energy_weekly"] += last_session
-    coordinator.data["energy_monthly"] += last_session
-    coordinator.data["energy_yearly"] += last_session
 ```
 
-### Reset Logic
+### Why We Use Utility Meter
 
-```python
-# In coordinator.py _check_and_reset_period_counters()
-now = datetime.now()
+Previously, the integration included custom daily/weekly/monthly/yearly sensors. These were removed because:
 
-# Daily reset
-if now.date() > last_reset_daily.date():
-    coordinator.data["energy_daily"] = 0.0
-    coordinator.data["last_reset_daily"] = now
-```
-
-### Sensor Value Calculation
-
-```python
-# In sensor.py period sensor classes
-@property
-def native_value(self) -> float | None:
-    # Base accumulated from completed sessions
-    base = self.coordinator.data.get("energy_daily", 0.0)
-    # Plus current ongoing session
-    current = self.coordinator.data.get("last_session_energy", 0.0)
-    return base + current
-```
-
----
-
-## Migration from Previous Versions
-
-If you were using the integration before these sensors were added:
-
-1. **Energy Total** will start from 0
-2. **Period sensors** will start tracking from first use
-3. **Historical data** is not back-filled
-4. **Energy Dashboard** will show data from first connection
-
-To preserve historical data:
-```yaml
-# Use utility_meter to track periods yourself
-utility_meter:
-  wallbox_daily:
-    source: sensor.bmw_wallbox_energy_total
-    cycle: daily
-```
-
----
-
-## Best Practices
-
-1. **Always use Energy Total for Energy Dashboard** - it's the only one that never resets
-2. **Monitor session sensor** during charging to see real-time progress
-3. **Use period sensors for budgets and alerts** - they reset automatically
-4. **Check last_reset attribute** to understand when period counters were reset
-5. **Create template sensors for costs** - multiply by your electricity rate
-6. **Use statistics platform** for long-term trends and averages
-7. **Set up alerts early** to catch unusual consumption patterns
+1. **Persistence issues** - Values reset on Home Assistant restart
+2. **Complexity** - Required custom reset logic and state management
+3. **Reliability** - Home Assistant's Utility Meter is battle-tested
+4. **Flexibility** - Users can customize reset times and add tariffs
 
 ---
 
@@ -508,6 +305,4 @@ utility_meter:
 - [DATA_SCHEMAS.md](DATA_SCHEMAS.md) - Data structure details
 - [COORDINATOR.md](COORDINATOR.md) - Coordinator API reference
 - [Home Assistant Energy Dashboard](https://www.home-assistant.io/docs/energy/)
-
-
-
+- [Home Assistant Utility Meter](https://www.home-assistant.io/integrations/utility_meter/)
