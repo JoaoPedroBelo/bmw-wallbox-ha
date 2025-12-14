@@ -48,7 +48,8 @@ async def test_platforms_defined():
     assert Platform.SENSOR in PLATFORMS
     assert Platform.BINARY_SENSOR in PLATFORMS
     assert Platform.BUTTON in PLATFORMS
-    assert len(PLATFORMS) == 3
+    assert Platform.NUMBER in PLATFORMS
+    assert len(PLATFORMS) == 4
 
 
 async def test_async_setup_entry(mock_hass, mock_config_entry):

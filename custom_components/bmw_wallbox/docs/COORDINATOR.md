@@ -241,14 +241,14 @@ if result["success"]:
 **Location:** `coordinator.py:671-743`
 
 ```python
-async def async_resume_charging(self, current_limit: float = 32.0) -> dict:
-    """Resume charging via SetChargingProfile(32A) - EVCC-style."""
+async def async_resume_charging(self, current_limit: float | None = None) -> dict:
+    """Resume charging via SetChargingProfile - EVCC-style."""
 ```
 
 **Purpose:** Resumes paused charging by setting current limit.
 
 **Parameters:**
-- `current_limit` - Target current in Amps (default: 32.0)
+- `current_limit` - Target current in Amps (optional). If not specified, uses the tracked user preference from `coordinator.data["current_limit"]`.
 
 **Requirements:**
 - Wallbox must be connected
@@ -264,6 +264,10 @@ async def async_resume_charging(self, current_limit: float = 32.0) -> dict:
 
 **Example:**
 ```python
+# Resume with user's preferred current limit (from slider)
+result = await coordinator.async_resume_charging()
+
+# Resume with specific current limit
 result = await coordinator.async_resume_charging(16.0)  # Resume at 16A
 ```
 
@@ -289,19 +293,23 @@ async def async_set_current_limit(self, limit: float) -> bool:
 
 **Returns:** `True` if accepted, `False` otherwise
 
+**Behavior:**
+- Sends `SetChargingProfile` to wallbox
+- If accepted, stores the value in `coordinator.data["current_limit"]`
+- The stored value is used by `async_start_charging()` and `async_resume_charging()`
+
 **Example:**
 ```python
 # Dynamic current limiting based on solar production
 available_amps = calculate_available_current()
 success = await coordinator.async_set_current_limit(available_amps)
-if success:
-    coordinator.data["current_limit"] = available_amps
+# If successful, coordinator.data["current_limit"] is automatically updated
 ```
 
 **Important Notes:**
 - Does NOT work without an active transaction
 - Use for solar charging, load balancing, etc.
-- Value is applied immediately
+- Value is applied immediately and remembered for future start/resume operations
 
 ---
 
@@ -578,11 +586,13 @@ EVCC-style flow:
 
 | User Action | Method Called | OCPP Command |
 |-------------|---------------|--------------|
-| Press Start (no tx) | `async_start_charging()` | `RequestStartTransaction` + `SetChargingProfile(32A)` |
-| Press Start (paused) | `async_start_charging()` | `SetChargingProfile(32A)` |
+| Press Start (no tx) | `async_start_charging()` | `RequestStartTransaction` + `SetChargingProfile(user_limit)` |
+| Press Start (paused) | `async_start_charging()` | `SetChargingProfile(user_limit)` |
 | Press Stop | `async_stop_charging()` | `SetChargingProfile(0A)` |
-| Adjust Current | `async_set_current_limit()` | `SetChargingProfile(XA)` |
+| Adjust Current | `async_set_current_limit()` | `SetChargingProfile(XA)` + updates `current_limit` |
 | Start failed (NUKE) | `async_start_charging()` | `Reset(Immediate)` |
+
+**Note:** `user_limit` is the value from the "Charging Current Limit" slider (`coordinator.data["current_limit"]`), which defaults to `max_current` from config.
 
 ### The NUKE Option
 

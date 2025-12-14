@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2024-12-14
+
+### 🎚️ New Feature: Charging Current Limit Slider
+
+Added a slider control to adjust the charging current limit (6A to max_current).
+
+### Added
+
+- **Current Limit Slider** - New number entity to set charging current (6A - 32A)
+  - Works as a slider in the Home Assistant UI
+  - When changed during active charging: immediately updates the wallbox
+  - When changed while not charging: saves for next start/resume
+  - Defaults to `max_current` from your integration config
+
+### Fixed
+
+- **Bug: Forced 32A on Start** - Previously, starting or resuming charging always forced 32A regardless of user preference
+  - Now uses the value from the Current Limit slider
+  - Respects your configured `max_current` setting
+
+### Changed
+
+- `async_start_charging()` now uses tracked `current_limit` instead of hardcoded 32A
+- `async_resume_charging()` now uses tracked `current_limit` as default (instead of 32.0)
+- `async_set_current_limit()` now stores the accepted value for future start/resume operations
+
+### Technical
+
+- Added `current_limit` field to `coordinator.data` (initialized from config's `max_current`)
+- Added `NUMBER_CURRENT_LIMIT` constant
+- Added `Platform.NUMBER` to registered platforms
+- New file: `number.py` with `BMWWallboxCurrentLimitNumber` entity
+
+### Tests
+
+- Added 8 new tests for the current limit number entity
+- All 93 tests pass
+
+### Documentation
+
+- Updated COORDINATOR.md with new method signatures and behavior
+- Updated ENTITIES.md with number entity details
+
+---
+
 ## [1.3.0] - 2024-12-14
 
 ### 🚨 Major Fix: Reliable Pause/Resume Charging

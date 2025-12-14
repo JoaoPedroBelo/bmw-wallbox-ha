@@ -61,6 +61,8 @@ BUTTON_START: Final = "start"
 BUTTON_STOP: Final = "stop"
 BUTTON_REBOOT: Final = "reboot"
 
+NUMBER_CURRENT_LIMIT: Final = "current_limit"
+
 # Attributes
 ATTR_TRANSACTION_ID: Final = "transaction_id"
 ATTR_CHARGING_STATE: Final = "charging_state"

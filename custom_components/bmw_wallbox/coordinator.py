@@ -39,7 +39,7 @@ from ocpp.v201.enums import (
 )
 import websockets
 
-from .const import DOMAIN, UPDATE_INTERVAL
+from .const import CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT, DOMAIN, UPDATE_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -503,6 +503,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "temperature": None,
             # Configurable settings
             "led_brightness": 46,  # Default from capabilities report
+            "current_limit": config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
         }
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -724,7 +725,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 # Wait for transaction to establish, then send SetChargingProfile to enable current
                 await asyncio.sleep(2)
 
-                max_current = self.config.get("max_current", 32)
+                max_current = self.data.get(
+                    "current_limit", self.config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+                )
                 _LOGGER.info(
                     "⚡ Sending SetChargingProfile(%dA) to enable current...",
                     max_current,
@@ -1119,8 +1122,18 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to pause: %s", err)
             return result
 
-    async def async_resume_charging(self, current_limit: float = 32.0) -> dict:
-        """Resume charging via SetChargingProfile(32A) - EVCC-style."""
+    async def async_resume_charging(self, current_limit: float | None = None) -> dict:
+        """Resume charging via SetChargingProfile - EVCC-style.
+
+        Args:
+            current_limit: Current limit in Amps. If None, uses the tracked user preference.
+        """
+        # Use tracked user preference if no limit specified
+        if current_limit is None:
+            current_limit = self.data.get(
+                "current_limit", self.config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+            )
+
         _LOGGER.info("▶️ RESUME CHARGING - SetChargingProfile(%dA)", current_limit)
 
         result = {"success": False, "message": ""}
@@ -1307,6 +1320,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             status_str = str(response.status)
             if status_str == "Accepted" or "accepted" in status_str.lower():
                 _LOGGER.info("✅ Current limit set to %sA - accepted by wallbox", limit)
+                # Track the new limit for future start/resume operations
+                self.data["current_limit"] = limit
+                self.async_set_updated_data(self.data)
                 return True
             _LOGGER.warning(
                 "⚠️ Current limit rejected by wallbox: %s. "

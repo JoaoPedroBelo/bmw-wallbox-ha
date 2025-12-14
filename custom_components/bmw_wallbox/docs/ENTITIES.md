@@ -6,9 +6,9 @@
 |----------|------|-------|------------|
 | Sensor | `sensor.py` | 19 | `BMWWallboxSensorBase` |
 | Binary Sensor | `binary_sensor.py` | 2 | `BMWWallboxBinarySensorBase` |
-| Button | `button.py` | 2 | `BMWWallboxButtonBase` |
-| Number | `number.py` | 2 | Direct `CoordinatorEntity` |
-| Switch | `switch.py` | 1 | Direct `CoordinatorEntity` |
+| Button | `button.py` | 4 | `BMWWallboxButtonBase` |
+| Number | `number.py` | 1 | Direct `CoordinatorEntity` |
+| Switch | `switch.py` | - | Not yet implemented |
 
 ---
 
@@ -116,21 +116,11 @@ classDiagram
     
     %% Number entities
     class BMWWallboxCurrentLimitNumber {
-        number.py:34-106
-    }
-    class BMWWallboxLEDBrightnessNumber {
-        number.py:109-143
+        number.py:39-105
+        Slider 6A to max_current
     }
     
     NumberEntity <|-- BMWWallboxCurrentLimitNumber
-    NumberEntity <|-- BMWWallboxLEDBrightnessNumber
-    
-    %% Switch entity
-    class BMWWallboxChargingSwitch {
-        switch.py:27-58
-    }
-    
-    SwitchEntity <|-- BMWWallboxChargingSwitch
 ```
 
 ---
