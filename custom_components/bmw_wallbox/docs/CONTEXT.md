@@ -15,12 +15,12 @@
 
 This integration allows Home Assistant to control and monitor BMW electric vehicle wallboxes. It acts as an **OCPP Central System (CSMS)** - the wallbox connects TO Home Assistant, not the other way around.
 
-```
-┌─────────────┐     WebSocket (wss://)     ┌─────────────────┐
-│  BMW        │ ──────────────────────────►│  Home Assistant │
-│  Wallbox    │     OCPP 2.0.1 Messages    │  (This Code)    │
-│  (Client)   │ ◄──────────────────────────│  (Server)       │
-└─────────────┘                            └─────────────────┘
+```mermaid
+flowchart LR
+    Wallbox["BMW Wallbox<br/>(Client)"]
+    HA["Home Assistant<br/>(This Code)<br/>(Server)"]
+    
+    Wallbox <-->|"WebSocket (wss://)<br/>OCPP 2.0.1 Messages"| HA
 ```
 
 ---

@@ -1,5 +1,13 @@
 ---
 description: Debugging and troubleshooting guide for the BMW Wallbox integration
+globs:
+  - "**/coordinator.py"
+  - "**/sensor.py"
+  - "**/button.py"
+  - "**/number.py"
+  - "**/switch.py"
+  - "**/binary_sensor.py"
+  - "**/config_flow.py"
 alwaysApply: false
 ---
 
@@ -7,8 +15,16 @@ alwaysApply: false
 
 ## Documentation References
 
-**Read first:**
-- `custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md` - Complete troubleshooting guide
+**MANDATORY - Read these files when debugging:**
+
+1. `custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md` - Complete troubleshooting guide, common issues, solutions
+2. `custom_components/bmw_wallbox/docs/PATTERNS.md` - Anti-patterns to avoid, decision trees for debugging
+3. `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Coordinator state, data flow, command patterns
+4. `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Expected data types and field values
+5. `custom_components/bmw_wallbox/docs/ARCHITECTURE.md` - Component relationships, message flow diagrams
+
+**For connection/OCPP issues:**
+- `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Message handler debugging
 
 ## Enable Debug Logging
 

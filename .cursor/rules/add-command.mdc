@@ -9,10 +9,15 @@ alwaysApply: false
 
 ## Documentation References
 
-**Read first:**
-- `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Section: "Template: Adding a New Outgoing Command"
-- `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Section: "Charging Control Methods"
-- `custom_components/bmw_wallbox/docs/PATTERNS.md` - Section: "Pattern: Sending OCPP Commands with Timeout"
+**MANDATORY - Read these files BEFORE making changes:**
+
+1. `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Full coordinator API, existing methods, EVCC-style control
+2. `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - OCPP protocol details, message types
+3. `custom_components/bmw_wallbox/docs/PATTERNS.md` - Decision trees, command patterns, anti-patterns
+4. `custom_components/bmw_wallbox/docs/CONTEXT.md` - Critical rules (especially EVCC-style pause/resume)
+5. `custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md` - Common command failures and solutions
+
+**CRITICAL:** Understand the EVCC-style control pattern before adding charging-related commands!
 
 ## Files to Modify
 
@@ -25,10 +30,10 @@ alwaysApply: false
 
 async def async_new_command(self, param: int) -> dict:
     """Send new command to wallbox.
-    
+
     Args:
         param: Command parameter
-        
+
     Returns:
         dict with keys: success (bool), message (str), action (str)
     """
@@ -37,21 +42,21 @@ async def async_new_command(self, param: int) -> dict:
         "message": "",
         "action": "failed",
     }
-    
+
     # ALWAYS check connection
     if not self.charge_point:
         result["message"] = "Wallbox not connected"
         _LOGGER.error("Cannot execute: no wallbox connected")
         return result
-    
+
     # Check transaction if required for this command
     if not self.current_transaction_id:
         result["message"] = "No active charging session"
         _LOGGER.error("Cannot execute: no transaction")
         return result
-    
+
     _LOGGER.info("Sending NewCommand with param=%s", param)
-    
+
     try:
         # ALWAYS use timeout (15 seconds)
         response = await asyncio.wait_for(
@@ -62,9 +67,9 @@ async def async_new_command(self, param: int) -> dict:
             ),
             timeout=15.0
         )
-        
+
         _LOGGER.debug("NewCommand response: %s", response.status)
-        
+
         if response.status == "Accepted":
             result["success"] = True
             result["message"] = "Command accepted"
@@ -72,9 +77,9 @@ async def async_new_command(self, param: int) -> dict:
         else:
             result["message"] = f"Rejected: {response.status}"
             result["action"] = "rejected"
-        
+
         return result
-        
+
     except asyncio.TimeoutError:
         result["message"] = "Command timed out - wallbox not responding"
         _LOGGER.error("NewCommand timed out!")

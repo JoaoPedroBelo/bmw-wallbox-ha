@@ -125,7 +125,21 @@ class WallboxChargePoint(cp):
                 elif measurand == "Energy.Active.Import.Register":
                     # Use wallbox value directly
                     self.coordinator.data["energy_session"] = float(value)
-                    self.coordinator.data["energy_total"] = float(value) / 1000.0
+                    # Only update energy_total if new value is positive and >= current
+                    # This prevents utility meters from being corrupted by 0/reset values
+                    new_energy = float(value) / 1000.0
+                    current_energy = self.coordinator.data.get("energy_total")
+                    if new_energy > 0 and (
+                        current_energy is None or new_energy >= current_energy
+                    ):
+                        self.coordinator.data["energy_total"] = new_energy
+                    else:
+                        _LOGGER.debug(
+                            "Ignoring energy_total update: new=%.3f kWh, current=%s kWh "
+                            "(value must be > 0 and >= current)",
+                            new_energy,
+                            current_energy,
+                        )
                 elif measurand == "Current.Import":
                     if phase == "L1-N":
                         self.coordinator.data["current_l1"] = float(value)
@@ -249,7 +263,21 @@ class WallboxChargePoint(cp):
                     elif measurand == "Energy.Active.Import.Register":
                         # Use wallbox value directly
                         self.coordinator.data["energy_session"] = float(value)
-                        self.coordinator.data["energy_total"] = float(value) / 1000.0
+                        # Only update energy_total if new value is positive and >= current
+                        # This prevents utility meters from being corrupted by 0/reset values
+                        new_energy = float(value) / 1000.0
+                        current_energy = self.coordinator.data.get("energy_total")
+                        if new_energy > 0 and (
+                            current_energy is None or new_energy >= current_energy
+                        ):
+                            self.coordinator.data["energy_total"] = new_energy
+                        else:
+                            _LOGGER.debug(
+                                "Ignoring energy_total update: new=%.3f kWh, "
+                                "current=%s kWh (value must be > 0 and >= current)",
+                                new_energy,
+                                current_energy,
+                            )
                     elif measurand == "Energy.Active.Export.Register":
                         self.coordinator.data["energy_active_export"] = (
                             float(value) / 1000
@@ -434,7 +462,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "connected": False,
             "charging_state": "Unknown",
             "power": 0.0,
-            "energy_total": 0.0,
+            "energy_total": None,  # None until first valid reading (prevents 0 corruption)
             "energy_session": 0.0,
             "current": 0.0,
             "voltage": 0.0,
@@ -483,6 +511,44 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         # This just returns the current state
         return self.data
 
+    async def async_configure_wallbox_for_pause_resume(self) -> None:
+        """Configure wallbox to allow pause/resume without ending transaction.
+
+        Sets StopTxOnEVSideDisconnect to false so we can use SetChargingProfile(0A)
+        to pause without the transaction ending.
+        """
+        if not self.charge_point:
+            return
+
+        _LOGGER.info("🔧 Configuring wallbox for pause/resume support...")
+
+        try:
+            # Try to set StopTxOnEVSideDisconnect to false
+            set_var = SetVariableDataType(
+                attribute_type=AttributeEnumType.actual,
+                attribute_value="false",
+                component=ComponentType(name="TxCtrlr"),
+                variable=VariableType(name="StopTxOnEVSideDisconnect"),
+            )
+
+            response = await asyncio.wait_for(
+                self.charge_point.call(call.SetVariables(set_variable_data=[set_var])),
+                timeout=15.0,
+            )
+
+            if response.set_variable_result:
+                result = response.set_variable_result[0]
+                status = result.get("attribute_status", "Unknown")
+                _LOGGER.info("StopTxOnEVSideDisconnect configuration: %s", status)
+                if status == "Accepted":
+                    _LOGGER.info("✅ Wallbox configured for pause/resume!")
+                else:
+                    _LOGGER.warning(
+                        "⚠️ Could not configure StopTxOnEVSideDisconnect: %s", status
+                    )
+        except Exception as e:
+            _LOGGER.warning("Could not configure StopTxOnEVSideDisconnect: %s", e)
+
     async def async_start_server(self) -> None:
         """Start the OCPP WebSocket server."""
         _LOGGER.info("Starting OCPP server on port %s", self.config["port"])
@@ -512,6 +578,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
             # Request meter values on connect to get current energy
             asyncio.create_task(self._request_meter_values_on_connect())
+
+            # Configure wallbox for pause/resume support
+            asyncio.create_task(self.async_configure_wallbox_for_pause_resume())
 
             try:
                 await self.charge_point.start()
@@ -546,22 +615,23 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             await self.server.wait_closed()
             _LOGGER.info("OCPP server stopped")
 
-    async def async_start_charging(self, status_callback=None) -> dict:
-        """Smart start charging - uses the best method based on current state.
+    async def async_start_charging(
+        self, status_callback=None, allow_nuke: bool = True
+    ) -> dict:
+        """Start/resume charging using SetChargingProfile(32A).
 
-        Logic:
-        - No transaction → RequestStartTransaction (first time / cable just plugged)
-        - Transaction exists, power=0 → SetChargingProfile(32A) (resume from pause)
-        - Already charging → Do nothing
+        If there's an existing transaction, uses SetChargingProfile to resume.
+        If no transaction, uses RequestStartTransaction to create one.
 
-        This is the EVCC-style approach - no more stuck transactions!
+        NUKE OPTION: If all attempts fail and allow_nuke=True, reboots the wallbox
+        as a last resort (~60 seconds downtime).
 
         Returns a dict with:
             - success: bool
             - message: str (user-friendly message)
             - action: str (what was done)
         """
-        _LOGGER.info("🟢 SMART START CHARGING REQUESTED")
+        _LOGGER.info("🟢 START CHARGING REQUESTED")
 
         result = {
             "success": False,
@@ -592,34 +662,44 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             result["action"] = "already_charging"
             return result
 
-        # Case 1: Transaction exists - use SetChargingProfile to resume
+        # If there's an existing transaction, try to resume with SetChargingProfile
         if self.current_transaction_id:
             if status_callback:
                 await status_callback("Resuming charging...")
 
-            _LOGGER.info("▶️ Transaction exists - resuming with SetChargingProfile(32A)")
-            resume_result = await self.async_resume_charging(32.0)
+            _LOGGER.info("▶️ Transaction exists - resuming with SetChargingProfile")
+            resume_result = await self.async_resume_charging()
 
             if resume_result["success"]:
                 result["success"] = True
-                result["message"] = "Charging started! ⚡"
+                result["message"] = "Charging resumed! ⚡"
                 result["action"] = "resumed"
-            else:
-                result["message"] = resume_result["message"]
-                result["action"] = "resume_failed"
-
-            return result
-
-        # Case 2: No transaction - need RequestStartTransaction
-        if status_callback:
-            await status_callback("Starting new charging session...")
-
-        _LOGGER.info("📤 No transaction - sending RequestStartTransaction...")
-        try:
-            id_token = IdTokenType(
-                id_token=self.config.get("rfid_token", "00000000000000"),
-                type=IdTokenEnumType.local,
+                return result
+            _LOGGER.warning(
+                "Resume failed: %s - will try RequestStartTransaction",
+                resume_result["message"],
             )
+            # Don't nuke yet - let RequestStartTransaction try first
+
+        if status_callback:
+            await status_callback("Starting charging session...")
+
+        _LOGGER.info("📤 Sending RequestStartTransaction...")
+        try:
+            # Use configured RFID token if available, otherwise no authorization
+            rfid_token = self.config.get("rfid_token", "")
+            if rfid_token:
+                _LOGGER.info("Using RFID token: %s", rfid_token)
+                id_token = IdTokenType(
+                    id_token=rfid_token,
+                    type=IdTokenEnumType.local,
+                )
+            else:
+                _LOGGER.info("No RFID configured, using NoAuthorization")
+                id_token = IdTokenType(
+                    id_token="",
+                    type=IdTokenEnumType.no_authorization,
+                )
 
             response = await asyncio.wait_for(
                 self.charge_point.call(
@@ -635,30 +715,130 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.info("RequestStartTransaction response: %s", response.status)
 
             if response.status == RequestStartStopStatusEnumType.accepted:
-                result["success"] = True
-                result["message"] = "Charging started! ⚡"
-                result["action"] = "started"
-
                 # Store the transaction ID from response if available
                 if hasattr(response, "transaction_id") and response.transaction_id:
                     self.current_transaction_id = response.transaction_id
                     self.data["transaction_id"] = response.transaction_id
+                    _LOGGER.info("New transaction ID: %s", response.transaction_id)
+
+                # Wait for transaction to establish, then send SetChargingProfile to enable current
+                await asyncio.sleep(2)
+
+                max_current = self.config.get("max_current", 32)
+                _LOGGER.info(
+                    "⚡ Sending SetChargingProfile(%dA) to enable current...",
+                    max_current,
+                )
+
+                try:
+                    # Need to get the current transaction ID (might be from response or from TransactionEvent)
+                    tx_id = self.current_transaction_id or self.data.get(
+                        "transaction_id"
+                    )
+                    if tx_id:
+                        start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                        schedule = ChargingScheduleType(
+                            id=1,
+                            start_schedule=start_time,
+                            charging_rate_unit=ChargingRateUnitEnumType.amps,
+                            charging_schedule_period=[
+                                ChargingSchedulePeriodType(
+                                    start_period=0, limit=float(max_current)
+                                )
+                            ],
+                        )
+
+                        profile = ChargingProfileType(
+                            id=999,
+                            stack_level=0,
+                            charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
+                            charging_profile_kind=ChargingProfileKindEnumType.absolute,
+                            transaction_id=tx_id,
+                            charging_schedule=[schedule],
+                        )
+
+                        profile_response = await asyncio.wait_for(
+                            self.charge_point.call(
+                                call.SetChargingProfile(
+                                    evse_id=1, charging_profile=profile
+                                )
+                            ),
+                            timeout=15.0,
+                        )
+                        _LOGGER.info(
+                            "SetChargingProfile response: %s", profile_response.status
+                        )
+
+                        # Wait for charging to ramp up and request meter values
+                        _LOGGER.info("⏳ Waiting 5 seconds for charging to ramp up...")
+                        await asyncio.sleep(5)
+                        await self.async_trigger_meter_values()
+
+                except Exception as e:
+                    _LOGGER.warning(
+                        "SetChargingProfile failed: %s (charging may still work)", e
+                    )
+
+                result["success"] = True
+                result["message"] = "Charging started! ⚡"
+                result["action"] = "started"
             else:
                 result["message"] = (
                     f"Start rejected: {response.status}. Is the car connected?"
                 )
                 result["action"] = "rejected"
 
+                # 💣 NUKE OPTION: If everything failed and nuke is allowed, reboot wallbox
+                if allow_nuke:
+                    _LOGGER.warning(
+                        "💣 NUKE OPTION: All start methods failed, rebooting wallbox..."
+                    )
+                    if status_callback:
+                        await status_callback(
+                            "💣 NUKE: Rebooting wallbox (last resort)..."
+                        )
+
+                    nuke_result = await self.async_reset_wallbox(status_callback)
+                    if nuke_result["success"]:
+                        result["message"] = (
+                            "💣 Wallbox rebooting (~60s). Charging will auto-start."
+                        )
+                        result["action"] = "nuked"
+                        result["success"] = (
+                            True  # Consider it success since reboot works
+                        )
+                    else:
+                        result["message"] = (
+                            f"All methods failed. Nuke also failed: {nuke_result['message']}"
+                        )
+
             return result
 
         except TimeoutError:
             result["message"] = "Command timed out - wallbox not responding"
             _LOGGER.error("RequestStartTransaction timed out!")
-            return result
         except Exception as err:
             result["message"] = f"Error: {err!s}"
             _LOGGER.error("Failed to start charging: %s", err)
-            return result
+
+        # 💣 NUKE OPTION: If we got here due to exception and nuke is allowed
+        if not result["success"] and allow_nuke:
+            _LOGGER.warning(
+                "💣 NUKE OPTION: Start failed with error, rebooting wallbox..."
+            )
+            if status_callback:
+                await status_callback("💣 NUKE: Rebooting wallbox (last resort)...")
+
+            nuke_result = await self.async_reset_wallbox(status_callback)
+            if nuke_result["success"]:
+                result["message"] = (
+                    "💣 Wallbox rebooting (~60s). Charging will auto-start."
+                )
+                result["action"] = "nuked"
+                result["success"] = True
+
+        return result
 
     async def async_reset_wallbox(self, status_callback=None) -> dict:
         """Reset the wallbox to clear stuck transaction state.
@@ -778,6 +958,66 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
         return await self.async_start_charging(status_callback)
 
+    async def async_refresh_transaction_id(self) -> str | None:
+        """Query the wallbox to get/verify the current transaction ID.
+
+        Uses GetTransactionStatus to verify the transaction is still active.
+        Returns the transaction_id if valid, None otherwise.
+        """
+        if not self.charge_point:
+            _LOGGER.warning("Cannot refresh transaction ID - no wallbox connected")
+            return None
+
+        if not self.current_transaction_id:
+            _LOGGER.debug("No transaction ID to refresh")
+            return None
+
+        _LOGGER.info(
+            "🔄 Refreshing transaction status for: %s", self.current_transaction_id
+        )
+
+        try:
+            response = await asyncio.wait_for(
+                self.charge_point.call(
+                    call.GetTransactionStatus(
+                        transaction_id=self.current_transaction_id
+                    )
+                ),
+                timeout=10.0,
+            )
+
+            _LOGGER.info(
+                "GetTransactionStatus response: ongoing=%s, messages_in_queue=%s",
+                response.ongoing_indicator
+                if hasattr(response, "ongoing_indicator")
+                else "N/A",
+                response.messages_in_queue
+                if hasattr(response, "messages_in_queue")
+                else "N/A",
+            )
+
+            # If transaction is ongoing, the ID is valid
+            if hasattr(response, "ongoing_indicator") and response.ongoing_indicator:
+                _LOGGER.info(
+                    "✅ Transaction %s is still active", self.current_transaction_id
+                )
+                return self.current_transaction_id
+            _LOGGER.warning(
+                "⚠️ Transaction %s may have ended (ongoing=%s)",
+                self.current_transaction_id,
+                getattr(response, "ongoing_indicator", None),
+            )
+            # Transaction might have ended - clear it
+            # But don't clear yet, let the caller decide
+            return self.current_transaction_id
+
+        except TimeoutError:
+            _LOGGER.warning("GetTransactionStatus timed out")
+            return self.current_transaction_id  # Return existing ID, let command try
+        except Exception as err:
+            _LOGGER.warning("GetTransactionStatus failed: %s", err)
+            return self.current_transaction_id  # Return existing ID, let command try
+
     async def async_pause_charging(self) -> dict:
         """Pause charging via SetChargingProfile(0A) - EVCC-style.
 
@@ -791,6 +1031,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if not self.charge_point:
             result["message"] = "Wallbox not connected"
             return result
+
+        # Refresh transaction ID from wallbox before attempting pause
+        await self.async_refresh_transaction_id()
 
         if not self.current_transaction_id:
             result["message"] = "No active charging session"
@@ -809,6 +1052,16 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         )
 
         try:
+            # First clear ALL existing profiles to ensure clean state (like resume does)
+            _LOGGER.info("Clearing ALL charging profiles first...")
+            try:
+                clear_response = await asyncio.wait_for(
+                    self.charge_point.call(call.ClearChargingProfile()), timeout=10.0
+                )
+                _LOGGER.info("ClearChargingProfile response: %s", clear_response.status)
+            except Exception as e:
+                _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
+
             start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
             schedule = ChargingScheduleType(
@@ -820,9 +1073,10 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 ],
             )
 
+            # Use stackLevel=0 for highest priority (same as resume)
             profile = ChargingProfileType(
                 id=999,
-                stack_level=1,
+                stack_level=0,
                 charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
                 charging_profile_kind=ChargingProfileKindEnumType.absolute,
                 transaction_id=self.current_transaction_id,
@@ -838,11 +1092,22 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
             _LOGGER.info("Pause response: %s", response.status)
 
+            # Log additional status info if available
+            if hasattr(response, "status_info") and response.status_info:
+                _LOGGER.info(
+                    "Pause status_info: reason=%s, additional=%s",
+                    response.status_info.get("reason_code", "N/A"),
+                    response.status_info.get("additional_info", "N/A"),
+                )
+
             if response.status == "Accepted":
                 result["success"] = True
                 result["message"] = "Charging paused"
             else:
-                result["message"] = f"Pause rejected: {response.status}"
+                reason = ""
+                if hasattr(response, "status_info") and response.status_info:
+                    reason = f" ({response.status_info.get('reason_code', '')})"
+                result["message"] = f"Pause rejected: {response.status}{reason}"
 
             return result
 
@@ -863,6 +1128,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if not self.charge_point:
             result["message"] = "Wallbox not connected"
             return result
+
+        # Refresh transaction ID from wallbox before attempting resume
+        await self.async_refresh_transaction_id()
 
         if not self.current_transaction_id:
             result["message"] = "No active session - try starting first"
@@ -916,6 +1184,14 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
             _LOGGER.info("Resume response: %s", response.status)
 
+            # Log additional status info if available
+            if hasattr(response, "status_info") and response.status_info:
+                _LOGGER.info(
+                    "Resume status_info: reason=%s, additional=%s",
+                    response.status_info.get("reason_code", "N/A"),
+                    response.status_info.get("additional_info", "N/A"),
+                )
+
             if response.status == "Accepted":
                 result["success"] = True
                 result["message"] = f"Charging resumed at {current_limit}A"
@@ -927,7 +1203,10 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
                 asyncio.create_task(delayed_refresh())
             else:
-                result["message"] = f"Resume rejected: {response.status}"
+                reason = ""
+                if hasattr(response, "status_info") and response.status_info:
+                    reason = f" ({response.status_info.get('reason_code', '')})"
+                result["message"] = f"Resume rejected: {response.status}{reason}"
 
             return result
 
@@ -940,17 +1219,17 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             return result
 
     async def async_stop_charging(self) -> dict:
-        """Stop charging - uses EVCC-style pause (SetChargingProfile 0A).
+        """Stop/pause charging using SetChargingProfile(0A).
 
-        This is MUCH better than RequestStopTransaction because:
-        - No stuck transactions
-        - Can resume instantly with Start button
-        - No wallbox reset needed
+        This pauses charging WITHOUT ending the transaction, so we can resume later.
+        Much better than RequestStopTransaction which puts the charger in Finishing
+        state and prevents restart.
 
         Returns a dict with:
             - success: bool
             - message: str (user-friendly message)
         """
+        _LOGGER.info("⏹️ STOP CHARGING - SetChargingProfile(0A)")
         return await self.async_pause_charging()
 
     async def async_set_current_limit(self, limit: float) -> bool:

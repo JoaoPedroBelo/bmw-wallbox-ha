@@ -32,6 +32,40 @@ tail -f /config/home-assistant.log | grep bmw_wallbox
 
 ---
 
+## Quick Diagnostic Flowchart
+
+```mermaid
+flowchart TB
+    Start([Problem Detected])
+    
+    Start --> Q1{Wallbox<br/>connecting?}
+    Q1 -->|NO| SSL{SSL certs<br/>exist?}
+    SSL -->|NO| FixSSL["Fix: Check cert paths<br/>/ssl/fullchain.pem<br/>/ssl/privkey.pem"]
+    SSL -->|YES| Port{Port<br/>accessible?}
+    Port -->|NO| FixPort["Fix: Check firewall<br/>Open port 9000"]
+    Port -->|YES| URL{Wallbox OCPP<br/>URL correct?}
+    URL -->|NO| FixURL["Fix: wss://HA_IP:9000/CPID"]
+    URL -->|YES| CheckLogs["Check debug logs<br/>for SSL errors"]
+    
+    Q1 -->|YES| Q2{Entities<br/>updating?}
+    Q2 -->|NO| CheckHB{Heartbeats<br/>in logs?}
+    CheckHB -->|NO| Reconnect["Wallbox disconnected<br/>Wait for reconnect"]
+    CheckHB -->|YES| CheckTE{TransactionEvents<br/>in logs?}
+    CheckTE -->|NO| NeedTx["No transaction<br/>Start charging"]
+    CheckTE -->|YES| CheckData["Check coordinator.data<br/>in Developer Tools"]
+    
+    Q2 -->|YES| Q3{Commands<br/>working?}
+    Q3 -->|NO| CheckConn{charge_point<br/>exists?}
+    CheckConn -->|NO| WaitConn["Wait for<br/>wallbox connection"]
+    CheckConn -->|YES| CheckTx{transaction_id<br/>exists?}
+    CheckTx -->|NO| NeedTx2["Start transaction<br/>before SetChargingProfile"]
+    CheckTx -->|YES| CheckResp["Check command<br/>response status"]
+    
+    Q3 -->|YES| Success([Working!])
+```
+
+---
+
 ## Common Issues
 
 ### Issue: Entity Not Appearing in Home Assistant
@@ -113,6 +147,20 @@ tail -f /config/home-assistant.log | grep bmw_wallbox
 
 **Causes & Solutions:**
 
+```mermaid
+flowchart TD
+    Rejected([Command Rejected])
+    
+    Rejected --> Check1{Has<br/>transaction_id?}
+    Check1 -->|NO| Fix1["SetChargingProfile requires<br/>active transaction!<br/>Start charging first"]
+    Check1 -->|YES| Check2{Correct<br/>EVSE ID?}
+    Check2 -->|NO| Fix2["Use evse_id=1<br/>for BMW wallbox"]
+    Check2 -->|YES| Check3{Valid<br/>current limit?}
+    Check3 -->|NO| Fix3["Limit must be 0-32A"]
+    Check3 -->|YES| Check4{Correct<br/>wallbox state?}
+    Check4 -->|YES| CheckLogs["Check detailed<br/>response in logs"]
+```
+
 1. **SetChargingProfile without transaction**
    ```python
    # SetChargingProfile requires active transaction
@@ -149,6 +197,24 @@ tail -f /config/home-assistant.log | grep bmw_wallbox
 - Wallbox doesn't connect
 - Log shows SSL errors
 - "Failed to start OCPP server"
+
+```mermaid
+flowchart TD
+    SSLError([SSL/Connection Error])
+    
+    SSLError --> CheckCert{Cert file<br/>exists?}
+    CheckCert -->|NO| FixCert["Create/copy certificate<br/>to /ssl/fullchain.pem"]
+    CheckCert -->|YES| CheckKey{Key file<br/>exists?}
+    CheckKey -->|NO| FixKey["Create/copy key<br/>to /ssl/privkey.pem"]
+    CheckKey -->|YES| CheckFormat{PEM<br/>format?}
+    CheckFormat -->|NO| FixFormat["Convert to PEM format<br/>Check cert chain complete"]
+    CheckFormat -->|YES| CheckPort{Port<br/>available?}
+    CheckPort -->|NO| FixPort["Change port or<br/>stop conflicting service"]
+    CheckPort -->|YES| CheckFW{Firewall<br/>open?}
+    CheckFW -->|NO| FixFW["Open port 9000<br/>in firewall"]
+    CheckFW -->|YES| CheckURL{Wallbox<br/>URL correct?}
+    CheckURL -->|NO| FixURL["wss://HA_IP:9000/CPID"]
+```
 
 **Causes & Solutions:**
 
@@ -195,27 +261,61 @@ tail -f /config/home-assistant.log | grep bmw_wallbox
 - "Transaction already exists" error
 - Start button doesn't work
 - Wallbox shows connected but won't charge
+- `RequestStartTransaction` rejected after stopping
 
-**Causes & Solutions:**
+```mermaid
+flowchart TD
+    Stuck([Cannot Start<br/>Charging])
+    
+    Stuck --> WasStop{Used<br/>RequestStop-<br/>Transaction?}
+    WasStop -->|YES| OCPP["OCPP 'Finishing' state!<br/>Cannot restart with IdTag"]
+    OCPP --> Recovery{Recovery<br/>Options}
+    Recovery --> Opt1["Option 1: Unplug/replug cable"]
+    Recovery --> Opt2["Option 2: 💣 NUKE - Reboot wallbox"]
+    Recovery --> Opt3["Option 3: Wait for auto-start"]
+    
+    WasStop -->|NO| CheckConn{Wallbox<br/>connected?}
+    CheckConn -->|NO| WaitConn["Wait for<br/>wallbox connection"]
+    CheckConn -->|YES| CheckCable{Cable<br/>plugged in?}
+    CheckCable -->|NO| PlugCable["Plug in<br/>charging cable"]
+    CheckCable -->|YES| TryNuke["Try 💣 NUKE option<br/>in async_start_charging()"]
+```
 
-1. **Previous transaction not ended properly**
+**Root Cause: OCPP "Finishing" State**
+
+According to the OCPP standard, after `RequestStopTransaction`, the charger enters "Finishing" state. From this state, **it is not allowed to start a new transaction with an IdTag**. This is defined by the OCPP specification and affects all compliant chargers.
+
+Source: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-starting-charging-via-ocpp-fails/13750/2)
+
+**Solutions:**
+
+1. **Use SetChargingProfile instead of Stop (Recommended)**
+   - This integration uses `SetChargingProfile(0A)` to pause
+   - Transaction stays active, avoids Finishing state
+   - Resume with `SetChargingProfile(32A)`
    
-   **Recovery option 1: Reset wallbox**
+2. **💣 NUKE Option (Automatic)**
+   - If all start methods fail, the integration automatically reboots the wallbox
+   - Takes ~60 seconds, charging auto-starts after reboot
+   - Enabled by default, can be disabled with `allow_nuke=False`
+   - Look for `💣 NUKE OPTION` in logs
+
+3. **Manual Recovery: Reset wallbox**
    ```python
    await coordinator.async_reset_wallbox()
    # Wait ~60 seconds for reboot
    ```
    
-   **Recovery option 2: Unplug and replug cable**
+4. **Manual Recovery: Unplug and replug cable**
    - Physically disconnect charging cable
    - Wait 10 seconds
    - Reconnect cable
    - New transaction should auto-start
 
-2. **Using RequestStopTransaction (anti-pattern)**
-   - This integration uses `SetChargingProfile(0A)` to pause
-   - Avoids stuck transaction states
-   - See `PATTERNS.md` for correct approach
+**Prevention:**
+- Always use the Stop button (which uses `SetChargingProfile(0A)`)
+- Avoid directly calling `RequestStopTransaction`
+- See `PATTERNS.md` for correct approach
 
 ---
 
@@ -339,6 +439,28 @@ _LOGGER.info("Registered entities: %s",
 
 ---
 
+### Issue: SetChargingProfile(0A) Causes Transaction to End
+
+**Symptoms:**
+- Pressing Stop works, but can't restart
+- Car shows charging stopped
+- Transaction ID cleared
+
+**Root Cause:**
+When `SetChargingProfile(0A)` is sent, the car sees 0A available and stops requesting power. If the wallbox has `StopTxOnEVSideDisconnect` enabled (default), it ends the transaction automatically.
+
+**Solution:**
+On wallbox connect, the integration tries to set `StopTxOnEVSideDisconnect=false`. Check logs for:
+```
+🔧 Configuring wallbox for pause/resume support...
+StopTxOnEVSideDisconnect configuration: Accepted
+✅ Wallbox configured for pause/resume!
+```
+
+If this configuration fails, the car may still end sessions when paused.
+
+---
+
 ## Common Error Messages
 
 ### "Wallbox not connected"
@@ -404,6 +526,21 @@ _LOGGER.info("Registered entities: %s",
 ---
 
 ## Quick Diagnostic Checklist
+
+```mermaid
+flowchart LR
+    subgraph Checklist["🔍 Diagnostic Checklist"]
+        C1["☐ Debug logging enabled?"]
+        C2["☐ SSL certs exist & readable?"]
+        C3["☐ Port accessible from wallbox?"]
+        C4["☐ Wallbox OCPP URL correct?"]
+        C5["☐ WebSocket connected? (heartbeats)"]
+        C6["☐ Transaction active?"]
+        C7["☐ Entity registered?"]
+        C8["☐ Entity has unique_id?"]
+        C9["☐ async_set_updated_data called?"]
+    end
+```
 
 - [ ] Debug logging enabled?
 - [ ] SSL certificates exist and readable?

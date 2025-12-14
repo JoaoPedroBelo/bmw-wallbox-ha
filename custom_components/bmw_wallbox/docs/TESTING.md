@@ -2,16 +2,18 @@
 
 ## Test Structure
 
-```
-tests/
-├── __init__.py           # Package marker
-├── conftest.py           # Shared fixtures
-├── test_sensor.py        # Sensor entity tests
-├── test_binary_sensor.py # Binary sensor tests (if exists)
-├── test_button.py        # Button entity tests
-├── test_number.py        # Number entity tests
-├── test_config_flow.py   # Config flow tests
-└── test_coordinator.py   # Coordinator tests (if exists)
+```mermaid
+flowchart TB
+    subgraph Tests["tests/"]
+        init["__init__.py<br/>Package marker"]
+        conftest["conftest.py<br/>Shared fixtures"]
+        test_sensor["test_sensor.py<br/>Sensor entity tests"]
+        test_binary["test_binary_sensor.py<br/>Binary sensor tests"]
+        test_button["test_button.py<br/>Button entity tests"]
+        test_number["test_number.py<br/>Number entity tests"]
+        test_config["test_config_flow.py<br/>Config flow tests"]
+        test_coord["test_coordinator.py<br/>Coordinator tests"]
+    end
 ```
 
 ---
@@ -557,7 +559,49 @@ mock_coordinator.charge_point.call = AsyncMock(return_value=response)
 
 ---
 
+## Test Flow Diagram
+
+```mermaid
+flowchart TB
+    subgraph Setup["Test Setup"]
+        Fixtures["Load Fixtures<br/>mock_coordinator<br/>mock_config_entry"]
+        MockData["Set Mock Data<br/>coordinator.data[...]"]
+    end
+    
+    subgraph Execute["Test Execution"]
+        CreateEntity["Create Entity<br/>SomeEntity(coordinator, entry)"]
+        CallMethod["Call Method<br/>or Access Property"]
+    end
+    
+    subgraph Assert["Assertions"]
+        CheckValue["Assert Values<br/>assert entity.native_value == X"]
+        CheckCalls["Assert Calls<br/>mock.method.assert_called_once()"]
+    end
+    
+    Fixtures --> MockData
+    MockData --> CreateEntity
+    CreateEntity --> CallMethod
+    CallMethod --> CheckValue
+    CallMethod --> CheckCalls
+```
+
+---
+
 ## Checklist: New Entity Tests
+
+```mermaid
+flowchart TB
+    subgraph Checklist["✅ Test Checklist"]
+        T1["☐ Test entity value/state"]
+        T2["☐ Test entity properties"]
+        T3["☐ Test unique_id format"]
+        T4["☐ Test device_info exists"]
+        T5["☐ Test extra_state_attributes"]
+        T6["☐ Test None/missing handling"]
+        T7["☐ Test availability conditions"]
+        T8["☐ Test actions (buttons/switches)"]
+    end
+```
 
 - [ ] Test entity value/state
 - [ ] Test entity properties (name, unit, device_class)

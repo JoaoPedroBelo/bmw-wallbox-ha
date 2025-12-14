@@ -97,48 +97,88 @@ await coordinator.async_stop_server()
 
 ### async_start_charging
 
-**Location:** `coordinator.py:363-469`
+**Location:** `coordinator.py:616-805`
 
 ```python
-async def async_start_charging(self, status_callback=None) -> dict:
-    """Smart start charging - uses the best method based on current state."""
+async def async_start_charging(self, status_callback=None, allow_nuke: bool = True) -> dict:
+    """Start/resume charging using SetChargingProfile(32A)."""
 ```
 
 **Purpose:** Intelligent start that chooses the right approach based on current state.
 
 **Parameters:**
 - `status_callback` - Optional async callback for progress updates
+- `allow_nuke` - If True (default), will reboot wallbox as last resort if all else fails
 
 **Returns:**
 ```python
 {
     "success": bool,    # True if charging started/resumed
     "message": str,     # User-friendly message
-    "action": str,      # "started", "resumed", "already_charging", "rejected", "failed"
+    "action": str,      # "started", "resumed", "already_charging", "rejected", "nuked", "failed"
 }
 ```
 
 **Logic Flow:**
-```
-Is wallbox connected?
-    NO → Return failure
 
-Already charging (power > 0)?
-    YES → Return "already_charging"
-
-Has active transaction?
-    YES → Use SetChargingProfile(32A) to resume
-    NO → Use RequestStartTransaction to start new session
+```mermaid
+flowchart TD
+    Start([async_start_charging called])
+    CheckConn{Is wallbox<br/>connected?}
+    FailNotConn[Return failure:<br/>'Not connected']
+    CheckPower{Already charging?<br/>power > 0}
+    SuccessAlready[Return 'already_charging']
+    CheckTx{Has active<br/>transaction?}
+    TryResume[Try SetChargingProfile 32A<br/>to resume]
+    ResumeOK{Resume<br/>succeeded?}
+    SuccessResume[Return 'resumed']
+    TryStart[Try RequestStartTransaction<br/>+ SetChargingProfile 32A]
+    StartOK{Start<br/>succeeded?}
+    SuccessStart[Return 'started']
+    CheckNuke{allow_nuke<br/>= True?}
+    Nuke["💣 NUKE: Reset(Immediate)<br/>Wallbox reboots ~60s"]
+    SuccessNuke[Return 'nuked']
+    FailAll[Return 'failed']
+    
+    Start --> CheckConn
+    CheckConn -->|NO| FailNotConn
+    CheckConn -->|YES| CheckPower
+    CheckPower -->|YES| SuccessAlready
+    CheckPower -->|NO| CheckTx
+    CheckTx -->|YES| TryResume
+    CheckTx -->|NO| TryStart
+    TryResume --> ResumeOK
+    ResumeOK -->|YES| SuccessResume
+    ResumeOK -->|NO| TryStart
+    TryStart --> StartOK
+    StartOK -->|YES| SuccessStart
+    StartOK -->|NO| CheckNuke
+    CheckNuke -->|YES| Nuke
+    CheckNuke -->|NO| FailAll
+    Nuke --> SuccessNuke
 ```
 
 **Example:**
 ```python
+# Normal start (with NUKE fallback)
 result = await coordinator.async_start_charging()
+
+# Start without NUKE fallback (won't reboot if all fails)
+result = await coordinator.async_start_charging(allow_nuke=False)
+
 if result["success"]:
-    print(f"Charging started: {result['action']}")
+    if result["action"] == "nuked":
+        print("Wallbox rebooting, charging will auto-start in ~60s")
+    else:
+        print(f"Charging started: {result['action']}")
 else:
     print(f"Failed: {result['message']}")
 ```
+
+**💣 NUKE Option:**
+The NUKE is a last resort when all start methods fail. It reboots the wallbox,
+which clears any stuck states. After reboot (~60 seconds), charging auto-starts
+if the cable is plugged in. Use with caution!
 
 ---
 
@@ -515,7 +555,11 @@ Traditional OCPP flow:
 1. `RequestStartTransaction` → Transaction starts
 2. `RequestStopTransaction` → Transaction ends
 
-**Problem:** After `RequestStopTransaction`, the wallbox may not allow a new transaction to start until the cable is unplugged and replugged. This creates "stuck" states.
+**Problem:** After `RequestStopTransaction`, the OCPP specification puts the charger in "Finishing" state. From this state, it's not allowed to start a new transaction with an IdTag. The only recovery options are:
+- Unplug and replug the cable
+- Reboot the wallbox
+
+This is defined by the OCPP standard and affects all chargers. See: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-starting-charging-via-ocpp-fails/13750/2)
 
 ### The Solution: SetChargingProfile
 
@@ -534,56 +578,67 @@ EVCC-style flow:
 
 | User Action | Method Called | OCPP Command |
 |-------------|---------------|--------------|
-| Press Start (no tx) | `async_start_charging()` | `RequestStartTransaction` |
+| Press Start (no tx) | `async_start_charging()` | `RequestStartTransaction` + `SetChargingProfile(32A)` |
 | Press Start (paused) | `async_start_charging()` | `SetChargingProfile(32A)` |
 | Press Stop | `async_stop_charging()` | `SetChargingProfile(0A)` |
 | Adjust Current | `async_set_current_limit()` | `SetChargingProfile(XA)` |
+| Start failed (NUKE) | `async_start_charging()` | `Reset(Immediate)` |
+
+### The NUKE Option
+
+If all start methods fail, the integration can automatically reboot the wallbox as a last resort:
+
+```mermaid
+flowchart TD
+    Start["START pressed"]
+    Try1["Try SetChargingProfile(32A)<br/>to resume"]
+    Fail1{Failed?}
+    Try2["Try RequestStartTransaction<br/>+ SetChargingProfile(32A)"]
+    Fail2{Failed?}
+    Nuke["💣 NUKE: Reset(Immediate)<br/>Wallbox reboots ~60 seconds"]
+    Success["Charging auto-starts<br/>after reboot"]
+    Done["Charging started"]
+    
+    Start --> Try1
+    Try1 --> Fail1
+    Fail1 -->|NO| Done
+    Fail1 -->|YES| Try2
+    Try2 --> Fail2
+    Fail2 -->|NO| Done
+    Fail2 -->|YES| Nuke
+    Nuke --> Success
+```
+
+The NUKE is enabled by default but can be disabled with `allow_nuke=False`.
 
 ---
 
 ## Coordinator Data Flow Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    BMWWallboxCoordinator                        │
-│                                                                 │
-│  ┌─────────────┐                           ┌─────────────────┐  │
-│  │   config    │                           │  device_info    │  │
-│  │  (dict)     │                           │   (dict)        │  │
-│  │             │                           │                 │  │
-│  │ port: 9000  │                           │ model: "..."    │  │
-│  │ ssl_cert:...│                           │ vendor: "BMW"   │  │
-│  │ ...         │                           │ ...             │  │
-│  └─────────────┘                           └─────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                        data (dict)                        │  │
-│  │                                                           │  │
-│  │  connected: True          power: 7200.0                   │  │
-│  │  charging_state: "..."    energy_total: 15.5              │  │
-│  │  transaction_id: "..."    current: 32.0                   │  │
-│  │  connector_status: "..."  voltage: 230.0                  │  │
-│  │  ...                      ...                             │  │
-│  │                                                           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│         ▲                                                       │
-│         │ Updates from OCPP handlers                            │
-│         │                                                       │
-│  ┌──────┴───────────────────────────────────────────────────┐  │
-│  │                  WallboxChargePoint                       │  │
-│  │                                                           │  │
-│  │  @on("TransactionEvent")                                  │  │
-│  │  async def on_transaction_event(...):                     │  │
-│  │      self.coordinator.data["power"] = value               │  │
-│  │      self.coordinator.async_set_updated_data(...)         │  │
-│  │                                                           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              ▲                                  │
-└──────────────────────────────┼──────────────────────────────────┘
-                               │
-                     WebSocket (wss://)
-                               │
-                        ┌──────┴──────┐
-                        │   Wallbox   │
-                        └─────────────┘
+```mermaid
+flowchart TB
+    subgraph Coordinator["BMWWallboxCoordinator"]
+        Config["config (dict)<br/>port: 9000<br/>ssl_cert: ...<br/>..."]
+        DevInfo["device_info (dict)<br/>model: '...'<br/>vendor: 'BMW'<br/>..."]
+        
+        subgraph DataDict["data (dict)"]
+            Conn["connected: True"]
+            State["charging_state: '...'"]
+            TxId["transaction_id: '...'"]
+            ConnStatus["connector_status: '...'"]
+            Power["power: 7200.0"]
+            Energy["energy_total: 15.5"]
+            Current["current: 32.0"]
+            Voltage["voltage: 230.0"]
+        end
+        
+        subgraph WCP["WallboxChargePoint"]
+            Handler["@on('TransactionEvent')<br/>async def on_transaction_event(...):<br/>    self.coordinator.data['power'] = value<br/>    self.coordinator.async_set_updated_data(...)"]
+        end
+    end
+    
+    Wallbox["Wallbox"]
+    
+    Wallbox <-->|"WebSocket (wss://)"| WCP
+    Handler -->|"Updates from<br/>OCPP handlers"| DataDict
 ```

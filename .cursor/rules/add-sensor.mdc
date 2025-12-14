@@ -11,11 +11,16 @@ alwaysApply: false
 
 ## Documentation References
 
-**Read first:**
-- `custom_components/bmw_wallbox/docs/ENTITIES.md` - Section: "Template: Adding a New Sensor"
-- `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Section: "Coordinator Data Schema"
-- `custom_components/bmw_wallbox/docs/CONSTANTS.md` - Section: "Sensor Entity Suffixes"
-- `custom_components/bmw_wallbox/docs/TESTING.md` - Section: "Testing Sensors"
+**MANDATORY - Read these files BEFORE making changes:**
+
+1. `custom_components/bmw_wallbox/docs/ENTITIES.md` - Complete entity templates and class hierarchy
+2. `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Coordinator data structure and field types
+3. `custom_components/bmw_wallbox/docs/CONSTANTS.md` - Naming conventions for sensor constants
+4. `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Where sensor data comes from (OCPP handlers)
+5. `custom_components/bmw_wallbox/docs/TESTING.md` - How to write tests for sensors
+
+**For energy-related sensors specifically:**
+- `custom_components/bmw_wallbox/docs/ENERGY_SENSORS.md` - Period counters, Energy Dashboard integration
 
 ## Files to Modify
 
@@ -99,9 +104,9 @@ async_add_entities([
 async def test_new_metric_sensor(hass, mock_coordinator, mock_config_entry):
     """Test new metric sensor."""
     mock_coordinator.data["new_metric"] = 1500.0
-    
+
     sensor = BMWWallboxNewMetricSensor(mock_coordinator, mock_config_entry)
-    
+
     assert sensor.native_value == 1500.0
     assert sensor.native_unit_of_measurement == "W"
     assert sensor.device_class == "power"

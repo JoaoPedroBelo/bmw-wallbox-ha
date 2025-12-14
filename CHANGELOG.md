@@ -5,6 +5,158 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2024-12-14
+
+### 🚨 Major Fix: Reliable Pause/Resume Charging
+
+This release completely rewrites how the integration controls charging, fixing critical issues that made pause/resume unreliable or impossible.
+
+---
+
+### The Problem We Solved
+
+#### Issue 1: "Pause Charging" Button Always Rejected ❌
+
+**Symptoms:**
+- Pressing "Stop/Pause Charging" resulted in `Rejected` response
+- Logs showed: `SetChargingProfile response: Rejected`
+- Charging continued despite pressing stop
+
+**Root Cause:**
+The previous implementation used incorrect `SetChargingProfile` parameters. The wallbox requires specific profile settings including proper `stack_level`, `transaction_id`, and clearing existing profiles first.
+
+---
+
+#### Issue 2: Cannot Restart After Stopping 🔒
+
+**Symptoms:**
+- `RequestStopTransaction` worked and stopped charging
+- But `RequestStartTransaction` was always `Rejected` afterwards
+- Only unplugging the cable or rebooting the wallbox would fix it
+
+**Root Cause:**
+This is actually **defined by the OCPP specification**! After `RequestStopTransaction`, the charger enters "Finishing" state. From this state, **it is NOT allowed to start a new transaction with an IdTag**. This affects ALL OCPP-compliant chargers.
+
+Source: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-starting-charging-via-ocpp-fails/13750/2)
+
+---
+
+#### Issue 3: Charging Starts but No Power Delivered ⚡️
+
+**Symptoms:**
+- `RequestStartTransaction` returned `Accepted`
+- But power stayed at 0W
+- Car showed "Preparing" but never charged
+
+**Root Cause:**
+The wallbox accepted the transaction but wasn't told to allow current flow. We now send `SetChargingProfile(32A)` immediately after starting a transaction to enable power delivery.
+
+---
+
+#### Issue 4: Car Ends Session When Paused 🔌
+
+**Symptoms:**
+- Using `SetChargingProfile(0A)` to pause worked
+- But then the car detected 0A available and stopped the session
+- Transaction ended automatically
+
+**Root Cause:**
+The wallbox had `StopTxOnEVSideDisconnect` enabled (default). When the car stops drawing power (because we set 0A), the wallbox ends the transaction. We now attempt to configure this setting to `false` on connect.
+
+---
+
+### The Solution: EVCC-Style Charging Control 🔌
+
+Named after the popular [EVCC](https://evcc.io/) project, this approach controls charging by adjusting current limits instead of starting/stopping transactions:
+
+| User Action | Old (Broken) Method | New (Working) Method |
+|-------------|---------------------|----------------------|
+| **Pause** | `RequestStopTransaction` → Stuck in "Finishing" | `SetChargingProfile(0A)` → Transaction stays alive |
+| **Resume** | `RequestStartTransaction` → Rejected | `SetChargingProfile(32A)` → Instant resume |
+| **Start (new)** | `RequestStartTransaction` → No power | `RequestStartTransaction` + `SetChargingProfile(32A)` |
+
+**Benefits:**
+- ✅ No stuck transactions
+- ✅ Instant pause/resume
+- ✅ No wallbox reset needed
+- ✅ Perfect for solar charging (adjust current dynamically)
+- ✅ Works with BMW wallbox quirks
+
+---
+
+### 💣 NUKE Option: Last Resort Recovery
+
+If all else fails, the integration can now automatically reboot the wallbox:
+
+```
+START pressed
+    ↓
+Try SetChargingProfile(32A) to resume existing transaction
+    ↓ (if fails)
+Try RequestStartTransaction + SetChargingProfile(32A)
+    ↓ (if fails)
+💣 NUKE: Reset(Immediate) → Wallbox reboots (~60 seconds)
+    ↓
+Charging auto-starts after reboot (if cable plugged in)
+```
+
+The NUKE is:
+- Enabled by default (can disable with `allow_nuke=False`)
+- Only triggers after ALL other methods fail
+- Takes ~60 seconds for wallbox to reboot
+- Charging usually auto-starts after reboot
+
+---
+
+### New Features
+
+- **Smart RFID handling** - Uses your configured RFID token, or `no_authorization` if RFID is disabled
+- **Transaction ID refresh** - Queries wallbox via `GetTransactionStatus` before operations
+- **Wallbox auto-configuration** - Sets `StopTxOnEVSideDisconnect=false` on connect
+- **Better logging** - Detailed logs for debugging charging issues
+
+---
+
+### Documentation Updates 📊
+
+All documentation now includes **Mermaid flowcharts** for visual understanding:
+
+- **COORDINATOR.md** - Start charging decision tree, NUKE flow, data architecture
+- **PATTERNS.md** - Decision trees for all charging operations
+- **TROUBLESHOOTING.md** - Diagnostic flowcharts for:
+  - SSL/connection errors
+  - Command rejections
+  - Stuck transactions
+  - Quick diagnostic checklist
+
+---
+
+### Test Suite Fixed ✅
+
+All **85 tests** now pass:
+
+- Button tests - Fixed entity ID mocking for Home Assistant
+- Config flow tests - Fixed integration loading in test environment
+- Coordinator tests - Fixed async task cleanup and timeout assertions
+- Sensor tests - Updated for new icon and attribute values
+
+---
+
+### Technical Changes
+
+**New coordinator methods:**
+- `async_refresh_transaction_id()` - Verify transaction is still active
+- `async_configure_wallbox_for_pause_resume()` - Set wallbox config on connect
+
+**Modified methods:**
+- `async_start_charging(allow_nuke=True)` - Smart start with NUKE fallback
+- `async_pause_charging()` - EVCC-style pause via `SetChargingProfile(0A)`
+- `async_resume_charging()` - EVCC-style resume via `SetChargingProfile(32A)`
+- `async_stop_charging()` - Now calls `async_pause_charging()` internally
+
+**pytest configuration:**
+- Added `asyncio_mode = "auto"` for proper async test support
+
 ## [1.2.1] - 2024-12-13
 
 ### Fixed

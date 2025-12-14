@@ -1,0 +1,142 @@
+---
+description: Main project context for BMW Wallbox Home Assistant integration
+globs:
+  - "**/*.py"
+  - "**/*.md"
+  - "**/*.json"
+  - "**/*.yaml"
+alwaysApply: true
+---
+
+# BMW Wallbox Integration - Project Context
+
+## Overview
+
+This is a **Home Assistant custom integration** for BMW electric vehicle wallboxes using **OCPP 2.0.1 protocol**.
+
+**Key Concept:** Home Assistant acts as an OCPP **server (CSMS)** - the wallbox connects TO Home Assistant, not the other way around.
+
+## Documentation Structure
+
+**ALWAYS read the relevant documentation before making changes:**
+
+| Documentation | When to Read |
+|---------------|--------------|
+| `docs/CONTEXT.md` | First-time orientation, understanding the project |
+| `docs/ARCHITECTURE.md` | Understanding component relationships, data flow |
+| `docs/COORDINATOR.md` | Modifying coordinator, adding commands, understanding API |
+| `docs/ENTITIES.md` | Adding/modifying sensors, buttons, numbers, switches |
+| `docs/OCPP_HANDLERS.md` | Adding handlers for new OCPP message types |
+| `docs/PATTERNS.md` | Understanding decision trees, best practices, anti-patterns |
+| `docs/DATA_SCHEMAS.md` | Understanding coordinator.data structure, config schema |
+| `docs/CONSTANTS.md` | Adding new constants, understanding naming conventions |
+| `docs/ENERGY_SENSORS.md` | Understanding energy tracking, period counters |
+| `docs/TESTING.md` | Writing tests, available fixtures |
+| `docs/TROUBLESHOOTING.md` | Debugging issues, common problems |
+| `docs/RELEASES.md` | Version history, changelog |
+
+All documentation is in: `custom_components/bmw_wallbox/docs/`
+
+## Core Files
+
+| File | Purpose |
+|------|---------|
+| `coordinator.py` | **Core file.** OCPP server, handlers, charging control commands |
+| `const.py` | All constants, entity suffixes, configuration keys |
+| `sensor.py` | 19 sensor entities |
+| `binary_sensor.py` | 2 binary sensors |
+| `button.py` | Start/Stop charging buttons |
+| `number.py` | Current limit, LED brightness sliders |
+| `switch.py` | Charging on/off toggle |
+| `config_flow.py` | Configuration UI |
+| `__init__.py` | Integration entry point |
+
+## Critical Rules
+
+### 1. EVCC-Style Control (MOST IMPORTANT)
+
+**DO NOT use `RequestStopTransaction`** - it causes stuck transaction states.
+
+**DO use `SetChargingProfile`** for pause/resume:
+```python
+# Pause: Set current to 0A (keeps transaction alive)
+await coordinator.async_pause_charging()
+
+# Resume: Set current back
+await coordinator.async_resume_charging(32.0)
+```
+
+### 2. Transaction Required for Current Control
+
+`SetChargingProfile` only works with an active transaction:
+```python
+if not self.current_transaction_id:
+    return {"success": False, "message": "No active transaction"}
+```
+
+### 3. All Data Flows Through Coordinator
+
+Entities read from `coordinator.data` dictionary. Never store state in entities:
+```python
+@property
+def native_value(self) -> float | None:
+    return self.coordinator.data.get("power")  # Always from coordinator
+```
+
+### 4. Always Use Timeouts
+
+All OCPP commands need `asyncio.wait_for()`:
+```python
+response = await asyncio.wait_for(
+    self.charge_point.call(call.SomeCommand(...)),
+    timeout=15.0
+)
+```
+
+### 5. Trigger Entity Updates
+
+After modifying `coordinator.data`, always call:
+```python
+self.coordinator.async_set_updated_data(self.coordinator.data)
+```
+
+## Quick Task Reference
+
+| Task | Read First | Then Use Rule |
+|------|------------|---------------|
+| Add a sensor | `docs/ENTITIES.md`, `docs/DATA_SCHEMAS.md` | `.cursor/rules/add-sensor.mdc` |
+| Add a button/switch/number | `docs/ENTITIES.md`, `docs/COORDINATOR.md` | `.cursor/rules/add-control.mdc` |
+| Add OCPP message handler | `docs/OCPP_HANDLERS.md`, `docs/PATTERNS.md` | `.cursor/rules/add-ocpp-handler.mdc` |
+| Add outgoing command | `docs/COORDINATOR.md`, `docs/PATTERNS.md` | `.cursor/rules/add-command.mdc` |
+| Debug an issue | `docs/TROUBLESHOOTING.md`, `docs/PATTERNS.md` | `.cursor/rules/debugging.mdc` |
+| Write tests | `docs/TESTING.md` | `.cursor/rules/testing.mdc` |
+
+## Coordinator Data Fields (Quick Reference)
+
+Key fields in `coordinator.data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `connected` | bool | Wallbox OCPP connection status |
+| `power` | float | Current power draw (W) |
+| `energy_total` | float | Total energy (kWh) |
+| `current` | float | Charging current (A) |
+| `voltage` | float | Line voltage (V) |
+| `charging_state` | str | Charging/SuspendedEVSE/Idle/etc |
+| `transaction_id` | str | Active session UUID |
+| `connector_status` | str | Available/Occupied/etc |
+
+Full schema in `docs/DATA_SCHEMAS.md`.
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/test_sensor.py -v
+
+# Run with coverage
+pytest tests/ --cov=custom_components.bmw_wallbox
+```

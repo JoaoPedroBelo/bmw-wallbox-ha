@@ -2,109 +2,126 @@
 
 ## Component Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            HOME ASSISTANT                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     BMW Wallbox Integration                          │    │
-│  │                                                                      │    │
-│  │  ┌──────────────┐    ┌─────────────────────────────────────────┐    │    │
-│  │  │ Config Flow  │    │           Coordinator                    │    │    │
-│  │  │ config_flow  │    │         coordinator.py                   │    │    │
-│  │  │    .py       │    │                                          │    │    │
-│  │  └──────┬───────┘    │  ┌────────────────────────────────────┐ │    │    │
-│  │         │            │  │     BMWWallboxCoordinator           │ │    │    │
-│  │         │ creates    │  │  - data: dict[str, Any]             │ │    │    │
-│  │         ▼            │  │  - charge_point: WallboxChargePoint │ │    │    │
-│  │  ┌──────────────┐    │  │  - current_transaction_id: str      │ │    │    │
-│  │  │ Config Entry │────┼──│  - device_info: dict                │ │    │    │
-│  │  └──────────────┘    │  │                                      │ │    │    │
-│  │                      │  │  Methods:                            │ │    │    │
-│  │                      │  │  - async_start_server()              │ │    │    │
-│  │                      │  │  - async_start_charging()            │ │    │    │
-│  │                      │  │  - async_pause_charging()            │ │    │    │
-│  │                      │  │  - async_set_current_limit()         │ │    │    │
-│  │                      │  └────────────────────────────────────┘ │    │    │
-│  │                      │                    │                     │    │    │
-│  │                      │                    │ contains            │    │    │
-│  │                      │                    ▼                     │    │    │
-│  │                      │  ┌────────────────────────────────────┐ │    │    │
-│  │                      │  │     WallboxChargePoint              │ │    │    │
-│  │                      │  │  (extends ocpp.v201.ChargePoint)    │ │    │    │
-│  │                      │  │                                      │ │    │    │
-│  │                      │  │  Handlers:                          │ │    │    │
-│  │                      │  │  - @on("BootNotification")          │ │    │    │
-│  │                      │  │  - @on("StatusNotification")        │ │    │    │
-│  │                      │  │  - @on("Heartbeat")                 │ │    │    │
-│  │                      │  │  - @on("TransactionEvent")          │ │    │    │
-│  │                      │  │  - @on("NotifyReport")              │ │    │    │
-│  │                      │  └────────────────────────────────────┘ │    │    │
-│  │                      └──────────────────┬──────────────────────┘    │    │
-│  │                                         │                           │    │
-│  │         ┌───────────────────────────────┼───────────────────────┐   │    │
-│  │         │                               │                       │   │    │
-│  │         ▼                               ▼                       ▼   │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────┐  ┌────────┐  ┌──────┐│    │
-│  │  │   Sensors   │  │Binary Sensor│  │ Buttons │  │ Number │  │Switch││    │
-│  │  │ sensor.py   │  │binary_sensor│  │button.py│  │number  │  │switch││    │
-│  │  │             │  │    .py      │  │         │  │  .py   │  │ .py  ││    │
-│  │  │ 15 entities │  │ 2 entities  │  │2 entities│ │2 entity│  │1 ent ││    │
-│  │  └─────────────┘  └─────────────┘  └─────────┘  └────────┘  └──────┘│    │
-│  │                                                                      │    │
-│  └──────────────────────────────────────────────────────────────────────┘    │
-│                                         ▲                                     │
-└─────────────────────────────────────────┼─────────────────────────────────────┘
-                                          │
-                                          │ WebSocket (wss://)
-                                          │ OCPP 2.0.1
-                                          │
-                                    ┌─────┴─────┐
-                                    │    BMW    │
-                                    │  Wallbox  │
-                                    │ (Client)  │
-                                    └───────────┘
+```mermaid
+flowchart TB
+    subgraph HA["HOME ASSISTANT"]
+        subgraph Integration["BMW Wallbox Integration"]
+            CF["Config Flow<br/>config_flow.py"]
+            CE["Config Entry"]
+            
+            subgraph Coord["Coordinator (coordinator.py)"]
+                BWC["BMWWallboxCoordinator<br/>- data: dict[str, Any]<br/>- charge_point: WallboxChargePoint<br/>- current_transaction_id: str<br/>- device_info: dict"]
+                BWC_Methods["Methods:<br/>- async_start_server()<br/>- async_start_charging()<br/>- async_pause_charging()<br/>- async_set_current_limit()"]
+                
+                WCP["WallboxChargePoint<br/>(extends ocpp.v201.ChargePoint)<br/><br/>Handlers:<br/>- @on('BootNotification')<br/>- @on('StatusNotification')<br/>- @on('Heartbeat')<br/>- @on('TransactionEvent')<br/>- @on('NotifyReport')"]
+            end
+            
+            subgraph Entities["Entity Platforms"]
+                Sensors["Sensors<br/>sensor.py<br/>15 entities"]
+                BinSensors["Binary Sensors<br/>binary_sensor.py<br/>2 entities"]
+                Buttons["Buttons<br/>button.py<br/>2 entities"]
+                Numbers["Numbers<br/>number.py<br/>2 entities"]
+                Switches["Switches<br/>switch.py<br/>1 entity"]
+            end
+        end
+    end
+    
+    Wallbox["BMW Wallbox<br/>(Client)"]
+    
+    CF -->|creates| CE
+    CE --> BWC
+    BWC --> BWC_Methods
+    BWC -->|contains| WCP
+    WCP <-->|"WebSocket (wss://)<br/>OCPP 2.0.1"| Wallbox
+    
+    Coord --> Sensors
+    Coord --> BinSensors
+    Coord --> Buttons
+    Coord --> Numbers
+    Coord --> Switches
 ```
 
 ---
 
 ## Class Hierarchy
 
-```
-DataUpdateCoordinator (Home Assistant)
-    └── BMWWallboxCoordinator
-            │
-            └── contains: WallboxChargePoint
-                              │
-                              └── extends: ocpp.v201.ChargePoint
-
-
-CoordinatorEntity (Home Assistant)
-    │
-    ├── SensorEntity
-    │       └── BMWWallboxSensorBase
-    │               ├── BMWWallboxStatusSensor
-    │               ├── BMWWallboxPowerSensor
-    │               ├── BMWWallboxEnergyTotalSensor
-    │               ├── BMWWallboxCurrentSensor
-    │               ├── BMWWallboxVoltageSensor
-    │               └── ... (15 total sensors)
-    │
-    ├── BinarySensorEntity
-    │       └── BMWWallboxBinarySensorBase
-    │               ├── BMWWallboxChargingBinarySensor
-    │               └── BMWWallboxConnectedBinarySensor
-    │
-    ├── ButtonEntity
-    │       └── BMWWallboxButtonBase
-    │               ├── BMWWallboxStartButton
-    │               └── BMWWallboxStopButton
-    │
-    ├── NumberEntity
-    │       ├── BMWWallboxCurrentLimitNumber
-    │       └── BMWWallboxLEDBrightnessNumber
-    │
-    └── SwitchEntity
-            └── BMWWallboxChargingSwitch
+```mermaid
+classDiagram
+    direction TB
+    
+    class DataUpdateCoordinator {
+        <<Home Assistant>>
+    }
+    class BMWWallboxCoordinator {
+        +data: dict
+        +charge_point: WallboxChargePoint
+    }
+    class WallboxChargePoint {
+        +id: str
+        +coordinator: BMWWallboxCoordinator
+    }
+    class ChargePoint {
+        <<ocpp.v201>>
+    }
+    
+    DataUpdateCoordinator <|-- BMWWallboxCoordinator
+    BMWWallboxCoordinator *-- WallboxChargePoint
+    ChargePoint <|-- WallboxChargePoint
+    
+    class CoordinatorEntity {
+        <<Home Assistant>>
+    }
+    class SensorEntity
+    class BinarySensorEntity
+    class ButtonEntity
+    class NumberEntity
+    class SwitchEntity
+    
+    class BMWWallboxSensorBase
+    class BMWWallboxStatusSensor
+    class BMWWallboxPowerSensor
+    class BMWWallboxEnergyTotalSensor
+    class BMWWallboxCurrentSensor
+    class BMWWallboxVoltageSensor
+    
+    class BMWWallboxBinarySensorBase
+    class BMWWallboxChargingBinarySensor
+    class BMWWallboxConnectedBinarySensor
+    
+    class BMWWallboxButtonBase
+    class BMWWallboxStartButton
+    class BMWWallboxStopButton
+    
+    class BMWWallboxCurrentLimitNumber
+    class BMWWallboxLEDBrightnessNumber
+    
+    class BMWWallboxChargingSwitch
+    
+    CoordinatorEntity <|-- SensorEntity
+    CoordinatorEntity <|-- BinarySensorEntity
+    CoordinatorEntity <|-- ButtonEntity
+    CoordinatorEntity <|-- NumberEntity
+    CoordinatorEntity <|-- SwitchEntity
+    
+    SensorEntity <|-- BMWWallboxSensorBase
+    BMWWallboxSensorBase <|-- BMWWallboxStatusSensor
+    BMWWallboxSensorBase <|-- BMWWallboxPowerSensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyTotalSensor
+    BMWWallboxSensorBase <|-- BMWWallboxCurrentSensor
+    BMWWallboxSensorBase <|-- BMWWallboxVoltageSensor
+    
+    BinarySensorEntity <|-- BMWWallboxBinarySensorBase
+    BMWWallboxBinarySensorBase <|-- BMWWallboxChargingBinarySensor
+    BMWWallboxBinarySensorBase <|-- BMWWallboxConnectedBinarySensor
+    
+    ButtonEntity <|-- BMWWallboxButtonBase
+    BMWWallboxButtonBase <|-- BMWWallboxStartButton
+    BMWWallboxButtonBase <|-- BMWWallboxStopButton
+    
+    NumberEntity <|-- BMWWallboxCurrentLimitNumber
+    NumberEntity <|-- BMWWallboxLEDBrightnessNumber
+    
+    SwitchEntity <|-- BMWWallboxChargingSwitch
 ```
 
 ---
@@ -113,115 +130,63 @@ CoordinatorEntity (Home Assistant)
 
 ### 1. Incoming Data (Wallbox → Home Assistant)
 
-```
-┌──────────────┐     OCPP Message      ┌──────────────────────┐
-│   Wallbox    │ ───────────────────►  │  WallboxChargePoint  │
-│              │   TransactionEvent    │  on_transaction_event│
-└──────────────┘                       └──────────┬───────────┘
-                                                  │
-                                                  │ Extract meter values
-                                                  │ Update coordinator.data
-                                                  ▼
-                                       ┌──────────────────────┐
-                                       │ BMWWallboxCoordinator│
-                                       │      .data dict      │
-                                       │                      │
-                                       │ power: 7200.0        │
-                                       │ current: 32.0        │
-                                       │ voltage: 230.0       │
-                                       │ charging_state: ...  │
-                                       └──────────┬───────────┘
-                                                  │
-                                                  │ async_set_updated_data()
-                                                  ▼
-                               ┌──────────────────────────────────┐
-                               │         All Entities             │
-                               │  (automatically notified via     │
-                               │   CoordinatorEntity pattern)     │
-                               │                                  │
-                               │  sensor.power.native_value       │
-                               │    → coordinator.data["power"]   │
-                               └──────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Wallbox
+    participant WCP as WallboxChargePoint<br/>on_transaction_event
+    participant Data as BMWWallboxCoordinator<br/>.data dict
+    participant Entities as All Entities<br/>(CoordinatorEntity pattern)
+    
+    Wallbox->>WCP: OCPP TransactionEvent
+    Note over WCP: Extract meter values
+    WCP->>Data: Update coordinator.data
+    Note over Data: power: 7200.0<br/>current: 32.0<br/>voltage: 230.0<br/>charging_state: ...
+    Data->>Entities: async_set_updated_data()
+    Note over Entities: Automatically notified<br/>sensor.power.native_value<br/>→ coordinator.data["power"]
 ```
 
 ### 2. Outgoing Commands (Home Assistant → Wallbox)
 
-```
-┌──────────────┐     User presses      ┌──────────────────────┐
-│  HA Frontend │ ───────────────────►  │  BMWWallboxStartBtn  │
-│              │   Start Charging      │   async_press()      │
-└──────────────┘                       └──────────┬───────────┘
-                                                  │
-                                                  │ Calls coordinator method
-                                                  ▼
-                                       ┌──────────────────────┐
-                                       │ BMWWallboxCoordinator│
-                                       │ async_start_charging │
-                                       └──────────┬───────────┘
-                                                  │
-                                                  │ Checks state, chooses action
-                                                  ▼
-                                       ┌──────────────────────┐
-                                       │  WallboxChargePoint  │
-                                       │      .call()         │
-                                       └──────────┬───────────┘
-                                                  │
-                                                  │ OCPP Command
-                                                  ▼
-                                       ┌──────────────────────┐
-                                       │      Wallbox         │
-                                       │  Executes command    │
-                                       └──────────────────────┘
+```mermaid
+sequenceDiagram
+    participant UI as HA Frontend
+    participant Btn as BMWWallboxStartBtn<br/>async_press()
+    participant Coord as BMWWallboxCoordinator<br/>async_start_charging
+    participant WCP as WallboxChargePoint<br/>.call()
+    participant Wallbox
+    
+    UI->>Btn: User presses Start Charging
+    Btn->>Coord: Calls coordinator method
+    Note over Coord: Checks state<br/>chooses action
+    Coord->>WCP: OCPP Command
+    WCP->>Wallbox: SetChargingProfile(32A)
+    Wallbox-->>WCP: Response
 ```
 
 ---
 
 ## Charging State Machine
 
-```
-                              ┌─────────────────┐
-                              │                 │
-                              │      Idle       │◄──────────────────────┐
-                              │   (No cable)    │                       │
-                              │                 │                       │
-                              └────────┬────────┘                       │
-                                       │                                │
-                                       │ Cable plugged in               │
-                                       ▼                                │
-                              ┌─────────────────┐                       │
-                              │                 │                       │
-                              │  EVConnected    │                       │
-                              │  (Cable ready)  │                       │
-                              │                 │                       │
-                              └────────┬────────┘                       │
-                                       │                                │
-                                       │ RequestStartTransaction        │
-                                       │ or Auto-start                  │
-                                       ▼                                │
-                              ┌─────────────────┐                       │
-              SetChargingProfile(32A)  │                 │                       │
-             ┌────────────────│    Charging     │───────────────────────┤
-             │                │  (Power > 0W)   │  Cable unplugged      │
-             │                │                 │                       │
-             │                └────────┬────────┘                       │
-             │                         │                                │
-             │                         │ SetChargingProfile(0A)         │
-             │                         │ or Car pauses                  │
-             │                         ▼                                │
-             │                ┌─────────────────┐                       │
-             │                │                 │                       │
-             └───────────────►│ SuspendedEVSE   │───────────────────────┘
-                              │  (Paused by us) │  Cable unplugged
-                              │  Power = 0W     │
-                              │                 │
-                              └─────────────────┘
-
-                              ┌─────────────────┐
-                              │                 │
-                              │  SuspendedEV    │  (Car decided to pause)
-                              │  (Paused by car)│  (Battery full, temp limit)
-                              │                 │
-                              └─────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: Initial state
+    
+    Idle: No cable connected
+    EVConnected: Cable ready
+    Charging: Power > 0W
+    SuspendedEVSE: Paused by us<br/>Power = 0W
+    SuspendedEV: Paused by car<br/>(Battery full, temp limit)
+    
+    Idle --> EVConnected: Cable plugged in
+    EVConnected --> Charging: RequestStartTransaction<br/>or Auto-start
+    Charging --> SuspendedEVSE: SetChargingProfile(0A)<br/>or Car pauses
+    SuspendedEVSE --> Charging: SetChargingProfile(32A)
+    Charging --> Idle: Cable unplugged
+    SuspendedEVSE --> Idle: Cable unplugged
+    EVConnected --> Idle: Cable unplugged
+    SuspendedEV --> Idle: Cable unplugged
+    Charging --> SuspendedEV: Car decides to pause
+    SuspendedEV --> Charging: Car resumes
 ```
 
 ---
@@ -230,66 +195,73 @@ CoordinatorEntity (Home Assistant)
 
 ### Normal Charging Session
 
-```
-Timeline    Wallbox                          Home Assistant
-─────────────────────────────────────────────────────────────────────
-   │
-   │        ──── WebSocket Connect ────►
-   │
-   │        ──── BootNotification ─────►
-   │        ◄─── BootNotificationResp ──     (stores device_info)
-   │
-   │        ──── StatusNotification ───►     connector_status = Available
-   │        ◄─── StatusNotificationResp ─
-   │
-   │        ──── Heartbeat ────────────►     connected = True
-   │        ◄─── HeartbeatResponse ─────
-   │
-   │        ... (Heartbeat every 10s) ...
-   │
-   │        [Cable plugged in]
-   │
-   │        ──── StatusNotification ───►     connector_status = Occupied
-   │        ◄─── StatusNotificationResp ─
-   │
-   │        ──── TransactionEvent ─────►     event_type = Started
-   │        ◄─── TransactionEventResp ──     transaction_id = "abc-123"
-   │                                         charging_state = EVConnected
-   │
-   │        [Charging starts]
-   │
-   │        ──── TransactionEvent ─────►     event_type = Updated
-   │        ◄─── TransactionEventResp ──     power = 7200W
-   │                                         current = 32A
-   │                                         energy_total = 1.5kWh
-   │
-   │        ... (TransactionEvent every 60s with meter values) ...
-   │
-   │        [User presses Stop]
-   │
-   │        ◄─── SetChargingProfile ────     limit = 0A (pause)
-   │        ──── SetChargingProfileResp►     status = Accepted
-   │
-   │        ──── TransactionEvent ─────►     charging_state = SuspendedEVSE
-   │        ◄─── TransactionEventResp ──     power = 0W
-   │
-   │        [User presses Start]
-   │
-   │        ◄─── SetChargingProfile ────     limit = 32A (resume)
-   │        ──── SetChargingProfileResp►     status = Accepted
-   │
-   │        ──── TransactionEvent ─────►     charging_state = Charging
-   │        ◄─── TransactionEventResp ──     power = 7200W
-   │
-   │        [Cable unplugged]
-   │
-   │        ──── TransactionEvent ─────►     event_type = Ended
-   │        ◄─── TransactionEventResp ──     stopped_reason = EVDisconnected
-   │
-   │        ──── StatusNotification ───►     connector_status = Available
-   │        ◄─── StatusNotificationResp ─
-   │
-   ▼
+```mermaid
+sequenceDiagram
+    participant Wallbox
+    participant HA as Home Assistant
+    
+    Note over Wallbox,HA: Connection Established
+    Wallbox->>HA: WebSocket Connect
+    
+    Wallbox->>HA: BootNotification
+    HA-->>Wallbox: BootNotificationResp
+    Note right of HA: stores device_info
+    
+    Wallbox->>HA: StatusNotification
+    HA-->>Wallbox: StatusNotificationResp
+    Note right of HA: connector_status = Available
+    
+    Wallbox->>HA: Heartbeat
+    HA-->>Wallbox: HeartbeatResponse
+    Note right of HA: connected = True
+    
+    Note over Wallbox,HA: ... Heartbeat every 10s ...
+    
+    Note over Wallbox: Cable plugged in
+    
+    Wallbox->>HA: StatusNotification
+    HA-->>Wallbox: StatusNotificationResp
+    Note right of HA: connector_status = Occupied
+    
+    Wallbox->>HA: TransactionEvent (Started)
+    HA-->>Wallbox: TransactionEventResp
+    Note right of HA: transaction_id = "abc-123"<br/>charging_state = EVConnected
+    
+    Note over Wallbox: Charging starts
+    
+    Wallbox->>HA: TransactionEvent (Updated)
+    HA-->>Wallbox: TransactionEventResp
+    Note right of HA: power = 7200W<br/>current = 32A<br/>energy_total = 1.5kWh
+    
+    Note over Wallbox,HA: ... TransactionEvent every 60s with meter values ...
+    
+    Note over HA: User presses Stop
+    
+    HA->>Wallbox: SetChargingProfile (0A)
+    Wallbox-->>HA: SetChargingProfileResp (Accepted)
+    
+    Wallbox->>HA: TransactionEvent
+    HA-->>Wallbox: TransactionEventResp
+    Note right of HA: charging_state = SuspendedEVSE<br/>power = 0W
+    
+    Note over HA: User presses Start
+    
+    HA->>Wallbox: SetChargingProfile (32A)
+    Wallbox-->>HA: SetChargingProfileResp (Accepted)
+    
+    Wallbox->>HA: TransactionEvent
+    HA-->>Wallbox: TransactionEventResp
+    Note right of HA: charging_state = Charging<br/>power = 7200W
+    
+    Note over Wallbox: Cable unplugged
+    
+    Wallbox->>HA: TransactionEvent (Ended)
+    HA-->>Wallbox: TransactionEventResp
+    Note right of HA: stopped_reason = EVDisconnected
+    
+    Wallbox->>HA: StatusNotification
+    HA-->>Wallbox: StatusNotificationResp
+    Note right of HA: connector_status = Available
 ```
 
 ---
@@ -340,37 +312,57 @@ self.async_set_updated_data(self.data)  # Triggers all entity updates
 
 ## File Dependencies
 
-```
-__init__.py
-    ├── imports: const.py (DOMAIN)
-    ├── imports: coordinator.py (BMWWallboxCoordinator)
-    └── loads: sensor.py, binary_sensor.py, button.py, number.py, switch.py
-
-coordinator.py
-    ├── imports: const.py (DOMAIN, UPDATE_INTERVAL)
-    ├── imports: ocpp library
-    └── imports: websockets library
-
-sensor.py
-    ├── imports: const.py (DOMAIN)
-    └── imports: coordinator.py (BMWWallboxCoordinator)
-
-binary_sensor.py
-    ├── imports: const.py (DOMAIN, BINARY_SENSOR_*)
-    └── imports: coordinator.py (BMWWallboxCoordinator)
-
-button.py
-    ├── imports: const.py (DOMAIN, BUTTON_*)
-    └── imports: coordinator.py (BMWWallboxCoordinator)
-
-number.py
-    ├── imports: const.py (DOMAIN, NUMBER_*)
-    └── imports: coordinator.py (BMWWallboxCoordinator)
-
-switch.py
-    ├── imports: const.py (DOMAIN, SWITCH_*)
-    └── imports: coordinator.py (BMWWallboxCoordinator)
-
-config_flow.py
-    └── imports: const.py (all CONF_*, DEFAULT_*, DOMAIN)
+```mermaid
+flowchart TB
+    subgraph Core["Core Files"]
+        init["__init__.py"]
+        const["const.py"]
+        coord["coordinator.py"]
+    end
+    
+    subgraph Platforms["Entity Platforms"]
+        sensor["sensor.py"]
+        binary["binary_sensor.py"]
+        button["button.py"]
+        number["number.py"]
+        switch["switch.py"]
+    end
+    
+    subgraph Config["Configuration"]
+        config["config_flow.py"]
+    end
+    
+    subgraph External["External Libraries"]
+        ocpp["ocpp library"]
+        ws["websockets library"]
+    end
+    
+    init -->|imports| const
+    init -->|imports| coord
+    init -->|loads| sensor
+    init -->|loads| binary
+    init -->|loads| button
+    init -->|loads| number
+    init -->|loads| switch
+    
+    coord -->|imports| const
+    coord -->|imports| ocpp
+    coord -->|imports| ws
+    
+    sensor -->|imports| const
+    sensor -->|imports| coord
+    
+    binary -->|imports| const
+    binary -->|imports| coord
+    
+    button -->|imports| const
+    button -->|imports| coord
+    
+    number -->|imports| const
+    number -->|imports| coord
+    
+    switch -->|imports| const
+    switch -->|imports| coord
+    
+    config -->|imports| const
 ```

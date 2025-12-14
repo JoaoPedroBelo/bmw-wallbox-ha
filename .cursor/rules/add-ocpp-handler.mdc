@@ -9,10 +9,16 @@ alwaysApply: false
 
 ## Documentation References
 
-**Read first:**
-- `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Section: "Template: Adding a New Handler"
-- `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Section: "OCPP Message Schemas"
-- `custom_components/bmw_wallbox/docs/PATTERNS.md` - Section: "Pattern: Updating Coordinator Data"
+**MANDATORY - Read these files BEFORE making changes:**
+
+1. `custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md` - Complete handler templates, existing handlers, decorator usage
+2. `custom_components/bmw_wallbox/docs/DATA_SCHEMAS.md` - Coordinator data structure, OCPP message field mappings
+3. `custom_components/bmw_wallbox/docs/COORDINATOR.md` - WallboxChargePoint class, coordinator data flow
+4. `custom_components/bmw_wallbox/docs/PATTERNS.md` - Data update patterns, entity refresh triggers
+5. `custom_components/bmw_wallbox/docs/ARCHITECTURE.md` - Understanding message flow between wallbox and HA
+
+**For handlers that provide new sensor data:**
+- Also read `.cursor/rules/add-sensor.mdc` for exposing data as entities
 
 ## Files to Modify
 
@@ -39,18 +45,18 @@ async def on_new_message_type(
         required_param1,
         required_param2
     )
-    
+
     # Extract and update coordinator data
     self.coordinator.data["new_field"] = required_param1
-    
+
     # Extract from kwargs if optional
     optional_val = kwargs.get("optional_param")
     if optional_val:
         self.coordinator.data["optional_field"] = optional_val
-    
+
     # ALWAYS trigger entity updates
     self.coordinator.async_set_updated_data(self.coordinator.data)
-    
+
     # Return appropriate response
     return call_result.NewMessageType(
         response_param="value",
@@ -127,7 +133,7 @@ if meter_value:
             measurand = sample.get("measurand")
             value = sample.get("value")
             phase = sample.get("phase")
-            
+
             if measurand == "Power.Active.Import":
                 self.coordinator.data["power"] = float(value)
             elif measurand == "Voltage":

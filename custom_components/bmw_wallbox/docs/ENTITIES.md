@@ -14,47 +14,123 @@
 
 ## Entity Class Hierarchy
 
-```
-CoordinatorEntity (Home Assistant)
-    │
-    ├── SensorEntity
-    │       └── BMWWallboxSensorBase          # sensor.py:64-86
-    │               ├── BMWWallboxStatusSensor
-    │               ├── BMWWallboxPowerSensor
-    │               ├── BMWWallboxEnergyTotalSensor           # For Energy Dashboard
-    │               ├── BMWWallboxEnergySessionSensor         # Per-session tracking
-    │               ├── BMWWallboxEnergyDailySensor           # Resets at midnight
-    │               ├── BMWWallboxEnergyWeeklySensor          # Resets Monday
-    │               ├── BMWWallboxEnergyMonthlySensor         # Resets 1st of month
-    │               ├── BMWWallboxEnergyYearlySensor          # Resets Jan 1st
-    │               ├── BMWWallboxCurrentSensor
-    │               ├── BMWWallboxVoltageSensor
-    │               ├── BMWWallboxStateSensor
-    │               ├── BMWWallboxConnectorStatusSensor
-    │               ├── BMWWallboxTransactionIDSensor
-    │               ├── BMWWallboxStoppedReasonSensor
-    │               ├── BMWWallboxEventTypeSensor
-    │               ├── BMWWallboxTriggerReasonSensor
-    │               ├── BMWWallboxIDTokenSensor
-    │               ├── BMWWallboxPhasesUsedSensor
-    │               └── BMWWallboxSequenceNumberSensor
-    │
-    ├── BinarySensorEntity
-    │       └── BMWWallboxBinarySensorBase    # binary_sensor.py:39-58
-    │               ├── BMWWallboxChargingBinarySensor
-    │               └── BMWWallboxConnectedBinarySensor
-    │
-    ├── ButtonEntity
-    │       └── BMWWallboxButtonBase          # button.py:38-96
-    │               ├── BMWWallboxStartButton
-    │               └── BMWWallboxStopButton
-    │
-    ├── NumberEntity
-    │       ├── BMWWallboxCurrentLimitNumber  # number.py:34-106
-    │       └── BMWWallboxLEDBrightnessNumber # number.py:109-143
-    │
-    └── SwitchEntity
-            └── BMWWallboxChargingSwitch      # switch.py:27-58
+```mermaid
+classDiagram
+    direction TB
+    
+    class CoordinatorEntity {
+        <<Home Assistant>>
+        +coordinator
+    }
+    
+    class SensorEntity
+    class BinarySensorEntity
+    class ButtonEntity
+    class NumberEntity
+    class SwitchEntity
+    
+    CoordinatorEntity <|-- SensorEntity
+    CoordinatorEntity <|-- BinarySensorEntity
+    CoordinatorEntity <|-- ButtonEntity
+    CoordinatorEntity <|-- NumberEntity
+    CoordinatorEntity <|-- SwitchEntity
+    
+    %% Sensor hierarchy
+    class BMWWallboxSensorBase {
+        sensor.py:64-86
+    }
+    class BMWWallboxStatusSensor
+    class BMWWallboxPowerSensor
+    class BMWWallboxEnergyTotalSensor {
+        For Energy Dashboard
+    }
+    class BMWWallboxEnergySessionSensor {
+        Per-session tracking
+    }
+    class BMWWallboxEnergyDailySensor {
+        Resets at midnight
+    }
+    class BMWWallboxEnergyWeeklySensor {
+        Resets Monday
+    }
+    class BMWWallboxEnergyMonthlySensor {
+        Resets 1st of month
+    }
+    class BMWWallboxEnergyYearlySensor {
+        Resets Jan 1st
+    }
+    class BMWWallboxCurrentSensor
+    class BMWWallboxVoltageSensor
+    class BMWWallboxStateSensor
+    class BMWWallboxConnectorStatusSensor
+    class BMWWallboxTransactionIDSensor
+    class BMWWallboxStoppedReasonSensor
+    class BMWWallboxEventTypeSensor
+    class BMWWallboxTriggerReasonSensor
+    class BMWWallboxIDTokenSensor
+    class BMWWallboxPhasesUsedSensor
+    class BMWWallboxSequenceNumberSensor
+    
+    SensorEntity <|-- BMWWallboxSensorBase
+    BMWWallboxSensorBase <|-- BMWWallboxStatusSensor
+    BMWWallboxSensorBase <|-- BMWWallboxPowerSensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyTotalSensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergySessionSensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyDailySensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyWeeklySensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyMonthlySensor
+    BMWWallboxSensorBase <|-- BMWWallboxEnergyYearlySensor
+    BMWWallboxSensorBase <|-- BMWWallboxCurrentSensor
+    BMWWallboxSensorBase <|-- BMWWallboxVoltageSensor
+    BMWWallboxSensorBase <|-- BMWWallboxStateSensor
+    BMWWallboxSensorBase <|-- BMWWallboxConnectorStatusSensor
+    BMWWallboxSensorBase <|-- BMWWallboxTransactionIDSensor
+    BMWWallboxSensorBase <|-- BMWWallboxStoppedReasonSensor
+    BMWWallboxSensorBase <|-- BMWWallboxEventTypeSensor
+    BMWWallboxSensorBase <|-- BMWWallboxTriggerReasonSensor
+    BMWWallboxSensorBase <|-- BMWWallboxIDTokenSensor
+    BMWWallboxSensorBase <|-- BMWWallboxPhasesUsedSensor
+    BMWWallboxSensorBase <|-- BMWWallboxSequenceNumberSensor
+    
+    %% Binary Sensor hierarchy
+    class BMWWallboxBinarySensorBase {
+        binary_sensor.py:39-58
+    }
+    class BMWWallboxChargingBinarySensor
+    class BMWWallboxConnectedBinarySensor
+    
+    BinarySensorEntity <|-- BMWWallboxBinarySensorBase
+    BMWWallboxBinarySensorBase <|-- BMWWallboxChargingBinarySensor
+    BMWWallboxBinarySensorBase <|-- BMWWallboxConnectedBinarySensor
+    
+    %% Button hierarchy
+    class BMWWallboxButtonBase {
+        button.py:38-96
+    }
+    class BMWWallboxStartButton
+    class BMWWallboxStopButton
+    
+    ButtonEntity <|-- BMWWallboxButtonBase
+    BMWWallboxButtonBase <|-- BMWWallboxStartButton
+    BMWWallboxButtonBase <|-- BMWWallboxStopButton
+    
+    %% Number entities
+    class BMWWallboxCurrentLimitNumber {
+        number.py:34-106
+    }
+    class BMWWallboxLEDBrightnessNumber {
+        number.py:109-143
+    }
+    
+    NumberEntity <|-- BMWWallboxCurrentLimitNumber
+    NumberEntity <|-- BMWWallboxLEDBrightnessNumber
+    
+    %% Switch entity
+    class BMWWallboxChargingSwitch {
+        switch.py:27-58
+    }
+    
+    SwitchEntity <|-- BMWWallboxChargingSwitch
 ```
 
 ---
@@ -104,6 +180,19 @@ class BMWWallboxSensorBase(CoordinatorEntity, SensorEntity):
 ---
 
 ## Template: Adding a New Sensor
+
+```mermaid
+flowchart LR
+    subgraph Steps["Adding a New Sensor"]
+        S1["1️⃣ Add constant<br/>to const.py"]
+        S2["2️⃣ Add data field<br/>to coordinator"]
+        S3["3️⃣ Extract value in<br/>OCPP handler"]
+        S4["4️⃣ Create sensor<br/>class"]
+        S5["5️⃣ Register in<br/>async_setup_entry"]
+    end
+    
+    S1 --> S2 --> S3 --> S4 --> S5
+```
 
 ### Step 1: Add Constant to `const.py`
 
@@ -567,6 +656,21 @@ automation:
 ## Checklist: New Entity
 
 When adding a new entity, ensure:
+
+```mermaid
+flowchart TB
+    subgraph Checklist["✅ New Entity Checklist"]
+        C1["☐ Constant added to const.py"]
+        C2["☐ Data field added to coordinator.data"]
+        C3["☐ Data extraction in OCPP handler"]
+        C4["☐ Entity class extends base"]
+        C5["☐ _attr_unique_id set"]
+        C6["☐ _attr_name set"]
+        C7["☐ _attr_device_info set"]
+        C8["☐ Registered in async_setup_entry"]
+        C9["☐ Test added"]
+    end
+```
 
 - [ ] Constant added to `const.py`
 - [ ] Data field added to `coordinator.data` with default

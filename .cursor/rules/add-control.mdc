@@ -12,10 +12,16 @@ alwaysApply: false
 
 ## Documentation References
 
-**Read first:**
-- `custom_components/bmw_wallbox/docs/ENTITIES.md` - Templates for buttons, switches, numbers
-- `custom_components/bmw_wallbox/docs/CONSTANTS.md` - Entity suffixes
-- `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Coordinator methods
+**MANDATORY - Read these files BEFORE making changes:**
+
+1. `custom_components/bmw_wallbox/docs/ENTITIES.md` - Complete templates for buttons, switches, numbers, base classes
+2. `custom_components/bmw_wallbox/docs/COORDINATOR.md` - Existing coordinator methods, how to add new commands
+3. `custom_components/bmw_wallbox/docs/PATTERNS.md` - UI patterns, loading states, availability conditions
+4. `custom_components/bmw_wallbox/docs/CONSTANTS.md` - Naming conventions for control entities
+5. `custom_components/bmw_wallbox/docs/TESTING.md` - How to test buttons, switches, numbers
+
+**For controls that send OCPP commands:**
+- Also read `.cursor/rules/add-command.mdc` for command implementation details
 
 ## Files to Modify
 
@@ -42,11 +48,11 @@ BUTTON_NEW_ACTION: Final = "new_action"
 async def async_new_action(self) -> dict:
     """Perform new action."""
     result = {"success": False, "message": ""}
-    
+
     if not self.charge_point:
         result["message"] = "Not connected"
         return result
-    
+
     try:
         response = await asyncio.wait_for(
             self.charge_point.call(call.SomeCommand(...)),
@@ -162,7 +168,7 @@ async def async_set_new_setting(self, value: int) -> bool:
     """Set new setting value."""
     if not self.charge_point:
         return False
-    
+
     try:
         response = await asyncio.wait_for(
             self.charge_point.call(call.SetVariables(...)),

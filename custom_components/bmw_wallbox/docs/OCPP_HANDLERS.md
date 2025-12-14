@@ -20,6 +20,42 @@ class WallboxChargePoint(cp):
 
 ---
 
+## Message Flow Overview
+
+```mermaid
+sequenceDiagram
+    participant WB as Wallbox<br/>(Client)
+    participant HA as Home Assistant<br/>(Server)
+    
+    Note over WB,HA: Connection & Initialization
+    WB->>HA: BootNotification
+    HA-->>WB: BootNotificationResponse
+    WB->>HA: StatusNotification
+    HA-->>WB: StatusNotificationResponse
+    
+    Note over WB,HA: Keepalive (every 10s)
+    loop Heartbeat
+        WB->>HA: Heartbeat
+        HA-->>WB: HeartbeatResponse
+    end
+    
+    Note over WB,HA: Charging Session
+    WB->>HA: TransactionEvent (Started)
+    HA-->>WB: TransactionEventResponse
+    loop Meter Values (every 60s)
+        WB->>HA: TransactionEvent (Updated)
+        HA-->>WB: TransactionEventResponse
+    end
+    WB->>HA: TransactionEvent (Ended)
+    HA-->>WB: TransactionEventResponse
+    
+    Note over WB,HA: Commands (HA → WB)
+    HA->>WB: SetChargingProfile
+    WB-->>HA: SetChargingProfileResponse
+```
+
+---
+
 ## Handler Decorator Pattern
 
 The `@on("MessageName")` decorator from `ocpp.routing` registers a method as a handler for a specific OCPP message type.
@@ -52,6 +88,13 @@ async def on_boot_notification(
 ## Incoming Message Handlers
 
 ### BootNotification
+
+```mermaid
+flowchart LR
+    WB[Wallbox] -->|BootNotification| Handler[on_boot_notification]
+    Handler -->|Store| DevInfo[device_info dict]
+    Handler -->|Return| Resp[BootNotificationResponse<br/>status: Accepted<br/>interval: 10s]
+```
 
 **Purpose:** Wallbox announces itself when connecting or rebooting.
 
@@ -98,6 +141,14 @@ async def on_boot_notification(self, charging_station, reason, **kwargs):
 
 ### StatusNotification
 
+```mermaid
+flowchart LR
+    WB[Wallbox] -->|StatusNotification| Handler[on_status_notification]
+    Handler -->|Update| Data["coordinator.data<br/>connector_status<br/>evse_id<br/>connector_id"]
+    Handler -->|Trigger| Update[async_set_updated_data]
+    Handler -->|Return| Resp[StatusNotificationResponse]
+```
+
 **Purpose:** Wallbox reports connector status changes.
 
 **Location:** `coordinator.py:79-97`
@@ -140,6 +191,13 @@ async def on_status_notification(
 
 ### Heartbeat
 
+```mermaid
+flowchart LR
+    WB[Wallbox] -->|Heartbeat<br/>every 10s| Handler[on_heartbeat]
+    Handler -->|Update| Data["coordinator.data<br/>connected: True<br/>last_heartbeat"]
+    Handler -->|Return| Resp[HeartbeatResponse<br/>current_time]
+```
+
 **Purpose:** Connection keepalive, sent every N seconds.
 
 **Location:** `coordinator.py:99-108`
@@ -164,6 +222,28 @@ async def on_heartbeat(self, **kwargs):
 ---
 
 ### TransactionEvent
+
+```mermaid
+flowchart TB
+    WB[Wallbox] -->|TransactionEvent| Handler[on_transaction_event]
+    
+    subgraph Processing["Data Extraction"]
+        TxInfo["transaction_info<br/>→ transaction_id<br/>→ charging_state<br/>→ stopped_reason"]
+        IdToken["id_token<br/>→ id_token<br/>→ id_token_type"]
+        MeterVal["meter_value[]<br/>→ power, energy<br/>→ current, voltage<br/>→ frequency, temp"]
+    end
+    
+    Handler --> TxInfo
+    Handler --> IdToken
+    Handler --> MeterVal
+    
+    TxInfo --> Data[coordinator.data]
+    IdToken --> Data
+    MeterVal --> Data
+    
+    Data --> Update[async_set_updated_data]
+    Handler --> Resp[TransactionEventResponse]
+```
 
 **Purpose:** Main data source - contains meter values and charging state. Sent periodically during charging.
 
@@ -229,6 +309,28 @@ async def on_transaction_event(
 ## Meter Value Extraction
 
 Meter values are nested in `TransactionEvent.meter_value[].sampled_value[]`.
+
+```mermaid
+flowchart TB
+    TE["TransactionEvent"]
+    MV["meter_value[]"]
+    SV["sampled_value[]"]
+    
+    TE --> MV
+    MV --> SV
+    
+    subgraph Sample["Each sampled_value"]
+        Val["value: '7200'"]
+        Meas["measurand: 'Power.Active.Import'"]
+        Phase["phase: 'L1' | null"]
+        Ctx["context: 'Sample.Periodic'"]
+        Loc["location: 'Outlet'"]
+    end
+    
+    SV --> Sample
+    
+    Sample -->|Extracted to| Data["coordinator.data<br/>power: 7200.0<br/>current_l1: 32.0<br/>..."]
+```
 
 **Location:** `coordinator.py:150-221` (inside `on_transaction_event`)
 
@@ -328,6 +430,32 @@ Commands are sent using the `call()` method of `WallboxChargePoint`.
 
 ### Pattern: Sending Commands with Timeout
 
+```mermaid
+flowchart TD
+    Start([Send Command])
+    
+    CheckConn{charge_point<br/>exists?}
+    FailConn["Return: 'Not connected'"]
+    
+    SendCmd["await asyncio.wait_for(<br/>    charge_point.call(Command),<br/>    timeout=15.0<br/>)"]
+    
+    Timeout{Timeout?}
+    FailTimeout["Return: 'Timed out'"]
+    
+    CheckResp{Response<br/>Accepted?}
+    Success["Return: Success"]
+    FailReject["Return: 'Rejected'"]
+    
+    Start --> CheckConn
+    CheckConn -->|NO| FailConn
+    CheckConn -->|YES| SendCmd
+    SendCmd --> Timeout
+    Timeout -->|YES| FailTimeout
+    Timeout -->|NO| CheckResp
+    CheckResp -->|YES| Success
+    CheckResp -->|NO| FailReject
+```
+
 ```python
 # coordinator.py - command pattern
 
@@ -411,6 +539,26 @@ if response.status == RequestStartStopStatusEnumType.accepted:
 ### SetChargingProfile
 
 **Purpose:** Control charging current. **REQUIRES active transaction.**
+
+```mermaid
+flowchart LR
+    subgraph Profile["ChargingProfile"]
+        ID["id: 999"]
+        Stack["stack_level: 1"]
+        Purpose["purpose: TxProfile"]
+        Kind["kind: Absolute"]
+        TxId["transaction_id: REQUIRED!"]
+        
+        subgraph Schedule["ChargingSchedule"]
+            Start["start_schedule: now"]
+            Unit["rate_unit: Amps"]
+            Period["period: [{start: 0, limit: 32A}]"]
+        end
+    end
+    
+    Profile --> WB[Wallbox]
+    WB --> Resp["Response: Accepted/Rejected"]
+```
 
 **Location:** `coordinator.py:624-648` (pause), `coordinator.py:698-722` (resume)
 
@@ -574,6 +722,19 @@ See `ENTITIES.md` for entity templates.
 ---
 
 ## Template: Adding a New Outgoing Command
+
+```mermaid
+flowchart TB
+    subgraph Steps["Adding New Command"]
+        S1["1️⃣ Add coordinator method"]
+        S2["2️⃣ Check prerequisites"]
+        S3["3️⃣ Build OCPP call"]
+        S4["4️⃣ Handle response"]
+        S5["5️⃣ Use in entity/button"]
+    end
+    
+    S1 --> S2 --> S3 --> S4 --> S5
+```
 
 ### Step 1: Add Coordinator Method
 

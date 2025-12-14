@@ -30,10 +30,16 @@ def mock_coordinator():
         "firmware_version": "1.0.0",
     }
     coordinator.current_transaction_id = "test-transaction-123"
-    coordinator.async_start_charging = AsyncMock(return_value=True)
-    coordinator.async_stop_charging = AsyncMock(return_value=True)
+    coordinator.async_start_charging = AsyncMock(
+        return_value={"success": True, "message": "Started", "action": "started"}
+    )
+    coordinator.async_stop_charging = AsyncMock(
+        return_value={"success": True, "message": "Stopped"}
+    )
     coordinator.async_set_current_limit = AsyncMock(return_value=True)
     coordinator.async_set_updated_data = MagicMock()
+    # For entity availability
+    coordinator.last_update_success = True
     return coordinator
 
 
@@ -62,3 +68,9 @@ def mock_wallbox_charge_point():
         charge_point.call = AsyncMock()
         mock.return_value = charge_point
         yield charge_point
+
+
+@pytest.fixture
+def enable_custom_integrations(hass):
+    """Enable custom integrations for testing."""
+    hass.data["custom_components"] = {}

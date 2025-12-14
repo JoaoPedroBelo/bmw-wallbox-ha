@@ -13,6 +13,42 @@ For period-based tracking (daily/weekly/monthly/yearly), use Home Assistant's bu
 
 ---
 
+## Energy Flow Architecture
+
+```mermaid
+flowchart TB
+    subgraph Wallbox["Wallbox"]
+        OCPP["OCPP Energy Register<br/>(resets each session)"]
+    end
+    
+    subgraph Coordinator["Coordinator"]
+        Raw["energy_session (Wh)<br/>Raw value from wallbox"]
+        Cumulative["energy_cumulative (kWh)<br/>Sum of completed sessions"]
+        LastSession["last_session_energy (kWh)<br/>For session detection"]
+    end
+    
+    subgraph Sensors["Energy Sensors"]
+        Total["Energy Total (kWh)<br/>= cumulative + current session<br/>NEVER resets"]
+        Session["Energy Session (Wh)<br/>Current session only"]
+    end
+    
+    subgraph HA["Home Assistant"]
+        Dashboard["Energy Dashboard"]
+        Utility["Utility Meter<br/>(daily/weekly/monthly)"]
+    end
+    
+    OCPP -->|TransactionEvent| Raw
+    Raw --> Session
+    Raw -->|"Convert to kWh"| Cumulative
+    Cumulative --> Total
+    LastSession -->|"Detect session end"| Cumulative
+    
+    Total --> Dashboard
+    Total --> Utility
+```
+
+---
+
 ## Energy Total Sensor
 
 ### Purpose
@@ -28,6 +64,30 @@ For period-based tracking (daily/weekly/monthly/yearly), use Home Assistant's bu
 - **Precision:** 2 decimal places
 
 ### How It Works
+
+```mermaid
+flowchart TD
+    subgraph Session1["Session 1"]
+        S1Start["Start: 0 kWh"]
+        S1End["End: 25 kWh"]
+        S1Add["Add to cumulative: 25 kWh"]
+    end
+    
+    subgraph Session2["Session 2"]
+        S2Start["Start: 0 kWh<br/>(wallbox resets)"]
+        S2Current["Current: 15 kWh"]
+    end
+    
+    subgraph Total["Energy Total Calculation"]
+        Calc["= cumulative + current<br/>= 25 + 15<br/>= 40 kWh ✓"]
+    end
+    
+    S1Start --> S1End
+    S1End -->|"Energy drops > 0.1 kWh<br/>(new session detected)"| S1Add
+    S1Add --> S2Start
+    S2Start --> S2Current
+    S2Current --> Calc
+```
 
 1. **Cumulative Tracking**: Accumulates energy across ALL charging sessions
 2. **Session Detection**: Monitors for energy drops > 0.1 kWh
@@ -52,6 +112,15 @@ Session 2: 0 → 15 kWh → total shows 40 kWh ✓
 
 ### Energy Dashboard Setup
 
+```mermaid
+flowchart LR
+    Settings["Settings"] --> Dashboards["Dashboards"]
+    Dashboards --> Energy["Energy"]
+    Energy --> Add["Add Consumption"]
+    Add --> Select["Select sensor.energy_total"]
+    Select --> Done["Done! ✓"]
+```
+
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **Add Consumption**
 3. Select `sensor.energy_total`
@@ -74,6 +143,24 @@ Track energy consumed in the **current charging session only**.
 - **Precision:** 0 decimal places
 
 ### Behavior
+
+```mermaid
+stateDiagram-v2
+    [*] --> Zero: New Session
+    Zero --> Increasing: Charging
+    Increasing --> Increasing: Power > 0
+    Increasing --> Zero: New Session Detected
+    
+    note right of Increasing
+        Value increases during charging
+        Shows current session energy
+    end note
+    
+    note right of Zero
+        Resets when new session starts
+        (energy drop > 0.1 kWh)
+    end note
+```
 
 - Starts at 0 when charging begins
 - Increases throughout the session
@@ -106,6 +193,17 @@ automation:
 Use Home Assistant's **Utility Meter** helper for daily/weekly/monthly/yearly tracking.
 
 ### Why Utility Meter?
+
+```mermaid
+flowchart LR
+    subgraph Benefits["✅ Benefits"]
+        B1["Automatic persistence"]
+        B2["Customizable reset times"]
+        B3["Native HA feature"]
+        B4["Tariff support"]
+        B5["No custom code needed"]
+    end
+```
 
 - ✅ **Automatic persistence** - survives Home Assistant restarts
 - ✅ **Customizable reset times** - choose when periods reset
@@ -148,6 +246,29 @@ utility_meter:
 ## Advanced Use Cases
 
 ### Cost Tracking with Tariffs
+
+```mermaid
+flowchart TB
+    subgraph Tariffs["Tariff Tracking"]
+        Peak["Peak Rate<br/>7am - 10pm<br/>€0.30/kWh"]
+        OffPeak["Off-Peak Rate<br/>10pm - 7am<br/>€0.15/kWh"]
+    end
+    
+    subgraph Automation["Automations"]
+        Auto1["7:00 AM → Set Peak"]
+        Auto2["10:00 PM → Set Off-Peak"]
+    end
+    
+    subgraph Result["Result"]
+        Total["Total: 100 kWh"]
+        PeakUsage["Peak: 30 kWh × €0.30 = €9.00"]
+        OffPeakUsage["Off-Peak: 70 kWh × €0.15 = €10.50"]
+        TotalCost["Total Cost: €19.50"]
+    end
+    
+    Tariffs --> Automation
+    Automation --> Result
+```
 
 ```yaml
 utility_meter:
@@ -198,6 +319,20 @@ template:
 ```
 
 ### Solar Charging Optimization
+
+```mermaid
+flowchart LR
+    Solar["Solar Production<br/>sensor.solar_production_daily"]
+    Wallbox["Wallbox Usage<br/>sensor.wallbox_energy_daily"]
+    
+    Calc["Calculate %<br/>min(solar, wallbox) / wallbox × 100"]
+    
+    Result["Solar Percentage<br/>sensor.wallbox_solar_percentage"]
+    
+    Solar --> Calc
+    Wallbox --> Calc
+    Calc --> Result
+```
 
 ```yaml
 template:
@@ -252,6 +387,19 @@ sensor:
 
 **Symptoms:** Energy Total stays at 0 or doesn't increase
 
+```mermaid
+flowchart TD
+    Problem["Energy Total not increasing"]
+    
+    Check1{Any charging<br/>sessions completed?}
+    Check1 -->|NO| Fix1["Complete a charging session<br/>to accumulate energy"]
+    Check1 -->|YES| Check2{TransactionEvents<br/>in logs?}
+    Check2 -->|NO| Fix2["Check wallbox connection<br/>Enable debug logging"]
+    Check2 -->|YES| Check3{energy_session<br/>has value?}
+    Check3 -->|NO| Fix3["Wallbox not sending<br/>energy measurements"]
+    Check3 -->|YES| CheckDev["Check Developer Tools → States<br/>Look for energy_cumulative"]
+```
+
 **Causes:**
 1. No charging sessions completed yet
 2. Wallbox not sending energy measurements
@@ -277,6 +425,26 @@ sensor:
 ## Technical Implementation
 
 ### Session End Detection Logic
+
+```mermaid
+flowchart TD
+    Event["TransactionEvent received"]
+    
+    GetLast["Get last_session_energy"]
+    GetCurrent["Get current session energy (kWh)"]
+    
+    Compare{current < last - 0.1?}
+    
+    NewSession["New session detected!<br/>Add last_session to cumulative"]
+    Continue["Continue tracking<br/>Update last_session_energy"]
+    
+    Event --> GetLast
+    Event --> GetCurrent
+    GetLast --> Compare
+    GetCurrent --> Compare
+    Compare -->|YES| NewSession
+    Compare -->|NO| Continue
+```
 
 ```python
 # In coordinator.py on_transaction_event()
@@ -306,4 +474,3 @@ Previously, the integration included custom daily/weekly/monthly/yearly sensors.
 - [COORDINATOR.md](COORDINATOR.md) - Coordinator API reference
 - [Home Assistant Energy Dashboard](https://www.home-assistant.io/docs/energy/)
 - [Home Assistant Utility Meter](https://www.home-assistant.io/integrations/utility_meter/)
-

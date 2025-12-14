@@ -50,11 +50,11 @@ async def test_state_sensor(
     sensor = BMWWallboxStateSensor(mock_coordinator, mock_config_entry)
 
     assert sensor.native_value == "Charging"
-    assert sensor.icon == "mdi:ev-station"
+    assert sensor.icon == "mdi:battery-charging"
 
     attrs = sensor.extra_state_attributes
-    assert attrs["evse_id"] == 1
-    assert attrs["connector_id"] == 1
+    assert attrs["ocpp_state"] == "Charging"
+    assert attrs["transaction_id"] == "test-transaction-123"
 
 
 async def test_transaction_id_sensor(
@@ -140,6 +140,7 @@ async def test_status_sensor_paused(
     mock_coordinator.data["connected"] = True
     mock_coordinator.data["charging_state"] = "SuspendedEVSE"
     mock_coordinator.data["transaction_id"] = "test-123"
+    mock_coordinator.data["power"] = 0  # Paused means no power
 
     assert sensor.native_value == "Paused"
     assert sensor.icon == "mdi:pause-circle"
@@ -175,9 +176,10 @@ async def test_energy_session_sensor(
     hass: HomeAssistant, mock_coordinator, mock_config_entry
 ) -> None:
     """Test energy session sensor."""
+    mock_coordinator.data["energy_session"] = 25500.0  # Session energy in Wh
     sensor = BMWWallboxEnergySessionSensor(mock_coordinator, mock_config_entry)
 
-    # 25.5 kWh should be converted to 25500 Wh
+    # Energy session is stored in Wh
     assert sensor.native_value == 25500.0
     assert sensor.native_unit_of_measurement == "Wh"
     assert sensor.device_class == "energy"

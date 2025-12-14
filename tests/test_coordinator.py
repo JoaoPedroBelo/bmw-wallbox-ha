@@ -1,7 +1,7 @@
 """Test BMW Wallbox coordinator."""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -392,7 +392,15 @@ async def test_async_pause_charging(coordinator):
 
 async def test_async_pause_charging_already_paused(coordinator):
     """Test pause charging when already paused."""
-    coordinator.charge_point = MagicMock()
+    mock_charge_point = MagicMock()
+    mock_charge_point.call = AsyncMock()
+
+    # Mock GetTransactionStatus response for refresh_transaction_id
+    mock_response = MagicMock()
+    mock_response.ongoing_indicator = True
+    mock_charge_point.call.return_value = mock_response
+
+    coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 0
 
@@ -414,7 +422,9 @@ async def test_async_resume_charging(coordinator):
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = "test-tx-123"
 
-    result = await coordinator.async_resume_charging(32.0)
+    # Patch create_task to avoid lingering tasks from delayed_refresh
+    with patch("asyncio.create_task"):
+        result = await coordinator.async_resume_charging(32.0)
 
     assert result["success"] is True
     assert "resumed" in result["message"].lower()
@@ -542,10 +552,10 @@ async def test_start_charging_timeout(coordinator):
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = None
 
-    result = await coordinator.async_start_charging()
+    result = await coordinator.async_start_charging(allow_nuke=False)
 
     assert result["success"] is False
-    assert "timeout" in result["message"].lower()
+    assert "timed out" in result["message"].lower()
 
 
 async def test_pause_charging_timeout(coordinator):
@@ -560,7 +570,7 @@ async def test_pause_charging_timeout(coordinator):
     result = await coordinator.async_pause_charging()
 
     assert result["success"] is False
-    assert "timeout" in result["message"].lower()
+    assert "timed out" in result["message"].lower()
 
 
 async def test_resume_charging_timeout(coordinator):
@@ -574,7 +584,7 @@ async def test_resume_charging_timeout(coordinator):
     result = await coordinator.async_resume_charging(32.0)
 
     assert result["success"] is False
-    assert "timeout" in result["message"].lower()
+    assert "timed out" in result["message"].lower()
 
 
 async def test_trigger_meter_values_error(coordinator):
