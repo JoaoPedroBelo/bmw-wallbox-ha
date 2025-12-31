@@ -125,5 +125,3 @@ async def test_current_limit_handles_failed_command(
     # Should still update coordinator.data (for next start/resume)
     assert mock_coordinator.data["current_limit"] == 24
     mock_coordinator.async_set_current_limit.assert_called_once_with(24)
-
-

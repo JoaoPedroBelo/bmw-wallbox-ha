@@ -726,7 +726,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(2)
 
                 max_current = self.data.get(
-                    "current_limit", self.config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+                    "current_limit",
+                    self.config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
                 )
                 _LOGGER.info(
                     "⚡ Sending SetChargingProfile(%dA) to enable current...",
