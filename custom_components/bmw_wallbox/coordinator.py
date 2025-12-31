@@ -1021,18 +1021,22 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("GetTransactionStatus failed: %s", err)
             return self.current_transaction_id  # Return existing ID, let command try
 
-    async def async_pause_charging(self) -> dict:
+    async def async_pause_charging(self, allow_nuke: bool = True) -> dict:
         """Pause charging via SetChargingProfile(0A) - EVCC-style.
 
         This pauses charging without ending the transaction!
         Much better than RequestStopTransaction which creates stuck states.
+
+        NUKE OPTION: If pause fails and allow_nuke=True, reboots the wallbox
+        as a last resort to stop charging (~60 seconds downtime).
         """
         _LOGGER.info("⏸️ PAUSE CHARGING - SetChargingProfile(0A)")
 
-        result = {"success": False, "message": ""}
+        result = {"success": False, "message": "", "action": "failed"}
 
         if not self.charge_point:
             result["message"] = "Wallbox not connected"
+            # Can't nuke if not connected
             return result
 
         # Refresh transaction ID from wallbox before attempting pause
@@ -1047,6 +1051,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if power == 0:
             result["success"] = True
             result["message"] = "Charging already paused"
+            result["action"] = "already_paused"
             _LOGGER.info("Already at 0W - no need to send pause command")
             return result
 
@@ -1106,20 +1111,79 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             if response.status == "Accepted":
                 result["success"] = True
                 result["message"] = "Charging paused"
+                result["action"] = "paused"
             else:
                 reason = ""
                 if hasattr(response, "status_info") and response.status_info:
                     reason = f" ({response.status_info.get('reason_code', '')})"
-                result["message"] = f"Pause rejected: {response.status}{reason}"
+
+                # 💣 NUKE OPTION: If pause rejected and nuke is allowed, reboot wallbox
+                if allow_nuke:
+                    _LOGGER.warning(
+                        "💣 NUKE OPTION: Pause rejected (%s), rebooting wallbox to force stop!",
+                        response.status,
+                    )
+                    nuke_result = await self.async_reset_wallbox()
+                    if nuke_result["success"]:
+                        result["success"] = True
+                        result["message"] = (
+                            "💣 Wallbox rebooting (~60s) to force stop charging"
+                        )
+                        result["action"] = "nuked"
+                    else:
+                        result["message"] = (
+                            f"Pause rejected and reboot failed: {nuke_result['message']}"
+                        )
+                        result["action"] = "nuke_failed"
+                else:
+                    result["message"] = f"Pause rejected: {response.status}{reason}"
 
             return result
 
         except TimeoutError:
-            result["message"] = "Command timed out"
+            _LOGGER.error("Pause command timed out!")
+            # 💣 NUKE OPTION: If timeout and nuke is allowed, reboot wallbox
+            if allow_nuke:
+                _LOGGER.warning(
+                    "💣 NUKE OPTION: Pause timed out, rebooting wallbox to force stop!"
+                )
+                nuke_result = await self.async_reset_wallbox()
+                if nuke_result["success"]:
+                    result["success"] = True
+                    result["message"] = (
+                        "💣 Wallbox rebooting (~60s) to force stop charging"
+                    )
+                    result["action"] = "nuked"
+                else:
+                    result["message"] = (
+                        f"Pause timed out and reboot failed: {nuke_result['message']}"
+                    )
+                    result["action"] = "nuke_failed"
+            else:
+                result["message"] = "Command timed out"
             return result
+
         except Exception as err:
-            result["message"] = f"Error: {err!s}"
             _LOGGER.error("Failed to pause: %s", err)
+            # 💣 NUKE OPTION: If exception and nuke is allowed, reboot wallbox
+            if allow_nuke:
+                _LOGGER.warning(
+                    "💣 NUKE OPTION: Pause failed with error, rebooting wallbox to force stop!"
+                )
+                nuke_result = await self.async_reset_wallbox()
+                if nuke_result["success"]:
+                    result["success"] = True
+                    result["message"] = (
+                        "💣 Wallbox rebooting (~60s) to force stop charging"
+                    )
+                    result["action"] = "nuked"
+                else:
+                    result["message"] = (
+                        f"Pause error and reboot failed: {nuke_result['message']}"
+                    )
+                    result["action"] = "nuke_failed"
+            else:
+                result["message"] = f"Error: {err!s}"
             return result
 
     async def async_resume_charging(self, current_limit: float | None = None) -> dict:
@@ -1231,19 +1295,23 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to resume: %s", err)
             return result
 
-    async def async_stop_charging(self) -> dict:
+    async def async_stop_charging(self, allow_nuke: bool = True) -> dict:
         """Stop/pause charging using SetChargingProfile(0A).
 
         This pauses charging WITHOUT ending the transaction, so we can resume later.
         Much better than RequestStopTransaction which puts the charger in Finishing
         state and prevents restart.
 
+        NUKE OPTION: If pause fails and allow_nuke=True, reboots the wallbox
+        as a last resort to stop charging (~60 seconds downtime).
+
         Returns a dict with:
             - success: bool
             - message: str (user-friendly message)
+            - action: str (what was done: paused, nuked, etc.)
         """
         _LOGGER.info("⏹️ STOP CHARGING - SetChargingProfile(0A)")
-        return await self.async_pause_charging()
+        return await self.async_pause_charging(allow_nuke=allow_nuke)
 
     async def async_set_current_limit(self, limit: float) -> bool:
         """Set charging current limit via SetChargingProfile.

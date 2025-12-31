@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2024-12-31
+
+### 🚨 CRITICAL FIX: Stop/Pause Failsafe (NUKE)
+
+**Problem:** When the wallbox rejected a pause/stop command, charging continued indefinitely with no fallback. This caused massive electricity costs when tariff changed from off-peak to peak.
+
+**Solution:** Added automatic wallbox reboot as failsafe when pause/stop commands fail.
+
+### Fixed
+
+- **CRITICAL: Stop charging now has failsafe reboot** - If `SetChargingProfile(0A)` is rejected, times out, or throws an exception, the wallbox is automatically rebooted to force stop charging
+  - Matches the existing failsafe behavior in `async_start_charging()`
+  - Logs with 💣 emoji for visibility: `💣 NUKE OPTION: Pause rejected, rebooting wallbox to force stop!`
+
+### Changed
+
+- `async_pause_charging()` now accepts `allow_nuke: bool = True` parameter
+- `async_stop_charging()` now accepts `allow_nuke: bool = True` parameter
+- Both methods now return an `action` field in the result dict (`paused`, `nuked`, `nuke_failed`, etc.)
+
+### Tests
+
+- Added 4 new tests for pause/stop NUKE failsafe behavior:
+  - `test_async_pause_charging_nuke_on_rejection`
+  - `test_async_pause_charging_no_nuke_when_disabled`
+  - `test_async_pause_charging_nuke_on_timeout`
+- All 96 tests pass
+
+---
+
 ## [1.4.0] - 2024-12-14
 
 ### 🎚️ New Feature: Charging Current Limit Slider

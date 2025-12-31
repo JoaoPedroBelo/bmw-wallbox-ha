@@ -410,6 +410,120 @@ async def test_async_pause_charging_already_paused(coordinator):
     assert "already paused" in result["message"].lower()
 
 
+async def test_async_pause_charging_nuke_on_rejection(coordinator):
+    """Test pause triggers NUKE (reboot) when SetChargingProfile is rejected."""
+    mock_charge_point = MagicMock()
+
+    # First call: GetTransactionStatus (refresh)
+    # Second call: ClearChargingProfile
+    # Third call: SetChargingProfile (rejected)
+    # Fourth call: Reset (NUKE)
+    call_count = 0
+
+    async def mock_call(request):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count <= 2:
+            # GetTransactionStatus and ClearChargingProfile
+            mock_resp = MagicMock()
+            mock_resp.ongoing_indicator = True
+            mock_resp.status = "Accepted"
+            return mock_resp
+        elif call_count == 3:
+            # SetChargingProfile - REJECTED!
+            mock_resp = MagicMock()
+            mock_resp.status = "Rejected"
+            mock_resp.status_info = None
+            return mock_resp
+        else:
+            # Reset - accepted
+            mock_resp = MagicMock()
+            mock_resp.status = "Accepted"
+            return mock_resp
+
+    mock_charge_point.call = mock_call
+    coordinator.charge_point = mock_charge_point
+    coordinator.current_transaction_id = "test-tx-123"
+    coordinator.data["power"] = 7000.0
+
+    result = await coordinator.async_pause_charging(allow_nuke=True)
+
+    assert result["success"] is True
+    assert result["action"] == "nuked"
+    assert "reboot" in result["message"].lower() or "💣" in result["message"]
+
+
+async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
+    """Test pause does NOT trigger NUKE when allow_nuke=False."""
+    mock_charge_point = MagicMock()
+
+    call_count = 0
+
+    async def mock_call(request):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count <= 2:
+            mock_resp = MagicMock()
+            mock_resp.ongoing_indicator = True
+            mock_resp.status = "Accepted"
+            return mock_resp
+        else:
+            # SetChargingProfile - REJECTED!
+            mock_resp = MagicMock()
+            mock_resp.status = "Rejected"
+            mock_resp.status_info = None
+            return mock_resp
+
+    mock_charge_point.call = mock_call
+    coordinator.charge_point = mock_charge_point
+    coordinator.current_transaction_id = "test-tx-123"
+    coordinator.data["power"] = 7000.0
+
+    result = await coordinator.async_pause_charging(allow_nuke=False)
+
+    assert result["success"] is False
+    assert "rejected" in result["message"].lower()
+    # Should NOT have called Reset (only 3 calls, not 4)
+    assert call_count == 3
+
+
+async def test_async_pause_charging_nuke_on_timeout(coordinator):
+    """Test pause triggers NUKE when command times out."""
+    mock_charge_point = MagicMock()
+
+    call_count = 0
+
+    async def mock_call(request):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count <= 2:
+            mock_resp = MagicMock()
+            mock_resp.ongoing_indicator = True
+            mock_resp.status = "Accepted"
+            return mock_resp
+        elif call_count == 3:
+            # SetChargingProfile - TIMEOUT!
+            raise TimeoutError("Connection timed out")
+        else:
+            # Reset - accepted
+            mock_resp = MagicMock()
+            mock_resp.status = "Accepted"
+            return mock_resp
+
+    mock_charge_point.call = mock_call
+    coordinator.charge_point = mock_charge_point
+    coordinator.current_transaction_id = "test-tx-123"
+    coordinator.data["power"] = 7000.0
+
+    result = await coordinator.async_pause_charging(allow_nuke=True)
+
+    assert result["success"] is True
+    assert result["action"] == "nuked"
+
+
 async def test_async_resume_charging(coordinator):
     """Test resume charging."""
     mock_charge_point = MagicMock()
