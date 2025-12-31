@@ -430,17 +430,16 @@ async def test_async_pause_charging_nuke_on_rejection(coordinator):
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
             return mock_resp
-        elif call_count == 3:
+        if call_count == 3:
             # SetChargingProfile - REJECTED!
             mock_resp = MagicMock()
             mock_resp.status = "Rejected"
             mock_resp.status_info = None
             return mock_resp
-        else:
-            # Reset - accepted
-            mock_resp = MagicMock()
-            mock_resp.status = "Accepted"
-            return mock_resp
+        # Reset - accepted
+        mock_resp = MagicMock()
+        mock_resp.status = "Accepted"
+        return mock_resp
 
     mock_charge_point.call = mock_call
     coordinator.charge_point = mock_charge_point
@@ -469,12 +468,11 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
             return mock_resp
-        else:
-            # SetChargingProfile - REJECTED!
-            mock_resp = MagicMock()
-            mock_resp.status = "Rejected"
-            mock_resp.status_info = None
-            return mock_resp
+        # SetChargingProfile - REJECTED!
+        mock_resp = MagicMock()
+        mock_resp.status = "Rejected"
+        mock_resp.status_info = None
+        return mock_resp
 
     mock_charge_point.call = mock_call
     coordinator.charge_point = mock_charge_point
@@ -504,14 +502,13 @@ async def test_async_pause_charging_nuke_on_timeout(coordinator):
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
             return mock_resp
-        elif call_count == 3:
+        if call_count == 3:
             # SetChargingProfile - TIMEOUT!
             raise TimeoutError("Connection timed out")
-        else:
-            # Reset - accepted
-            mock_resp = MagicMock()
-            mock_resp.status = "Accepted"
-            return mock_resp
+        # Reset - accepted
+        mock_resp = MagicMock()
+        mock_resp.status = "Accepted"
+        return mock_resp
 
     mock_charge_point.call = mock_call
     coordinator.charge_point = mock_charge_point
