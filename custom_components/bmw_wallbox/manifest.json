@@ -11,5 +11,6 @@
   "requirements": [
     "ocpp>=0.20.0"
   ],
-  "version": "1.4.1"
+  "version": "1.4.1",
+  "brand": "bmw_wallbox"
 }
