@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-01-06
+
+### Added
+
+- **Home Assistant Brands integration** - Icons now served from official Home Assistant Brands repository
+  - Added `brand` field to `manifest.json` to reference Brands CDN
+  - Icons available at `https://brands.home-assistant.io/_/bmw_wallbox/`
+  - Removed local icon files (icon.png, icon@2x.png, logo.png)
+  - Integration now displays official BMW Wallbox branding across all Home Assistant interfaces
+
+### Changed
+
+- Integration icons now load from Home Assistant Brands CDN instead of local files
+- Improved consistency with other Home Assistant integrations
+
 ## [1.4.1] - 2024-12-31
 
 ### 🚨 CRITICAL FIX: Stop/Pause Failsafe (NUKE)
