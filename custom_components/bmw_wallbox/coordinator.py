@@ -434,6 +434,16 @@ class WallboxChargePoint(cp):
         _LOGGER.debug("Security Event: type=%s, timestamp=%s", type, timestamp)
         return call_result.SecurityEventNotification()
 
+    @on("NotifyEvent")
+    async def on_notify_event(self, **kwargs):
+        """Handle NotifyEvent (OCPP 2.0.1).
+
+        Some chargers send this frequently. We accept it to avoid repeated
+        NotImplementedError / KeyError that can overload HA logs and event loop.
+        """
+        _LOGGER.debug("NotifyEvent received: %s", kwargs)
+        return call_result.NotifyEvent()
+
 
 class BMWWallboxCoordinator(DataUpdateCoordinator):
     """Class to manage fetching BMW Wallbox data."""

@@ -304,6 +304,31 @@ async def test_security_event_notification_handler(charge_point):
     assert response is not None
 
 
+async def test_notify_event_handler(charge_point):
+    """Test NotifyEvent handler.
+
+    Some wallboxes send NotifyEvent frequently. The handler accepts it
+    to prevent NotImplementedError spam in logs.
+    """
+    response = await charge_point.on_notify_event(
+        generated_at=datetime.utcnow().isoformat(),
+        seq_no=1,
+        event_data=[
+            {
+                "event_id": 1,
+                "timestamp": datetime.utcnow().isoformat(),
+                "trigger": "Alerting",
+                "actual_value": "true",
+                "component": {"name": "Connector", "evse": {"id": 1}},
+                "variable": {"name": "Available"},
+            }
+        ],
+    )
+
+    # Should not raise exception
+    assert response is not None
+
+
 # ==============================================================================
 # COMMAND TESTS
 # ==============================================================================
