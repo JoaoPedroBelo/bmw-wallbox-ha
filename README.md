@@ -36,6 +36,8 @@ A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Del
 
 ### Configuration
 
+> ⚠️ **Important:** BMW/Mini wallboxes require **valid SSL certificates** with a matching hostname. Self-signed certificates or IP addresses will not work. See the **[SSL Certificate Setup Guide](custom_components/bmw_wallbox/docs/SSL_SETUP.md)** for detailed instructions using Cloudflare + Let's Encrypt.
+
 1. Go to **Settings** → **Devices & Services**
 2. Click **+ Add Integration**
 3. Search for "BMW Wallbox"
@@ -43,20 +45,22 @@ A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Del
    - **WebSocket Port**: Default is 9000
    - **SSL Certificate Path**: Path to your SSL certificate (e.g., `/ssl/fullchain.pem`)
    - **SSL Key Path**: Path to your SSL private key (e.g., `/ssl/privkey.pem`)
-   - **Charge Point ID**: Your wallbox's unique ID
+   - **Charge Point ID**: Your wallbox's unique ID (format: `DE*BMW*XXXXXXXXXXXXXXXXX`)
    - **RFID Token** (optional): Authorization token
    - **Maximum Current**: Maximum allowed current (6-32A)
 
 ### Configure Your Wallbox
 
 Update your BMW wallbox OCPP settings to point to your Home Assistant:
-- **OCPP URL**: `wss://your-home-assistant.local:9000`
+- **OCPP URL**: `wss://local.yourdomain.com:9000` (must use a hostname, not an IP)
+- **Charge Station ID**: Must match the Charge Point ID in Home Assistant
 - **Protocol**: OCPP 2.0.1
 
 ## 📖 Documentation
 
 Comprehensive documentation is available in the [`docs`](custom_components/bmw_wallbox/docs/) folder:
 
+- **[SSL Certificate Setup](custom_components/bmw_wallbox/docs/SSL_SETUP.md)**: **Required** - How to set up valid SSL certificates (Cloudflare + Let's Encrypt)
 - **[Architecture](custom_components/bmw_wallbox/docs/ARCHITECTURE.md)**: Technical architecture overview
 - **[Energy Sensors](custom_components/bmw_wallbox/docs/ENERGY_SENSORS.md)**: Energy tracking and Utility Meter setup
 - **[OCPP Handlers](custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md)**: OCPP message handling details
@@ -128,8 +132,9 @@ automation:
 
 ## 🔧 Supported Hardware
 
-- **Primary**: BMW-branded Delta Electronics wallboxes (Model: EIAW-E22KTSE6B04)
-- **Potential**: Any OCPP 2.0.1 compatible wallbox (untested)
+- **BMW Wallbox**: Delta Electronics EIAW-E22KTSE6B04
+- **Mini Wallbox Plus**: Delta Electronics EIAW-E22KTSE6B15 (same hardware, different branding)
+- **Potential**: Any OCPP 2.0.1 compatible Delta Electronics wallbox (untested)
 
 ## 🛠️ Technical Details
 
