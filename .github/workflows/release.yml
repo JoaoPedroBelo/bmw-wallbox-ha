@@ -97,9 +97,10 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           
           # Extract the changelog section for this version
-          if grep -q "## \[$VERSION\]" CHANGELOG.md; then
-            # Extract content between this version and the next version/end
-            CHANGELOG=$(awk "/## \[$VERSION\]/,/## \[.*\]/{if(/## \[.*\]/ && !/## \[$VERSION\]/){exit}; print}" CHANGELOG.md | tail -n +2)
+          if grep -q "## \[${VERSION}\]" CHANGELOG.md; then
+            # Extract content between this version header and the next version header
+            # Using sed: print from version line until next ## [ line (exclusive)
+            CHANGELOG=$(sed -n "/## \[${VERSION}\]/,/## \[/{ /## \[${VERSION}\]/d; /## \[/q; p; }" CHANGELOG.md)
             echo "Found changelog for version $VERSION"
           else
             echo "⚠️ No changelog entry found for version $VERSION in CHANGELOG.md"
