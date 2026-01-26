@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-01-26
+
+### Added
+
+- **NotifyEvent Handler** - Added handler for OCPP 2.0.1 NotifyEvent messages
+  - Prevents `NotImplementedError` spam in Home Assistant logs
+  - Some wallboxes send this message frequently; now handled gracefully
+  - Thanks to [@eaglerbits](https://github.com/eaglerbits) for the contribution! ([#4](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/pull/4))
+
+### Fixed
+
+- **Release Notes** - Fixed "What's New" header not showing version number in GitHub releases
+
 ## [1.5.0] - 2026-01-06
 
 ### Added

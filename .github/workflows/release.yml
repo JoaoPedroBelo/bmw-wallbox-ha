@@ -126,10 +126,9 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
           
-          cat > /tmp/release-notes.md << 'EOF'
-          ## What's New in ${{ steps.version.outputs.tag }}
-          
-          EOF
+          # Write header with variable substitution
+          echo "## What's New in ${TAG}" > /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
           
           # Add changelog content
           cat /tmp/changelog.md >> /tmp/release-notes.md
