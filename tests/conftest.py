@@ -56,6 +56,7 @@ def mock_config_entry():
         "rfid_token": "00000000000000",
         "max_current": 32,
     }
+    entry.options = {}
     return entry
 
 
