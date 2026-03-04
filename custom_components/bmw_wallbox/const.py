@@ -11,13 +11,12 @@ CONF_SSL_KEY: Final = "ssl_key"
 CONF_CHARGE_POINT_ID: Final = "charge_point_id"
 CONF_RFID_TOKEN: Final = "rfid_token"
 CONF_MAX_CURRENT: Final = "max_current"
+CONF_SCAN_INTERVAL: Final = "scan_interval"
 
 # Defaults
 DEFAULT_PORT: Final = 9000
 DEFAULT_MAX_CURRENT: Final = 32
-
-# Update interval
-UPDATE_INTERVAL: Final = 10  # seconds
+DEFAULT_SCAN_INTERVAL: Final = 10  # seconds
 
 # Entity unique ID suffixes
 SENSOR_POWER: Final = "power"

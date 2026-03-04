@@ -40,6 +40,7 @@ def mock_config_entry():
         "rfid_token": "00000000000000",
         "max_current": 32,
     }
+    entry.options = {}
     return entry
 
 
@@ -68,9 +69,9 @@ async def test_async_setup_entry(mock_hass, mock_config_entry):
         assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
         assert mock_hass.data[DOMAIN][mock_config_entry.entry_id] == mock_coordinator
 
-        # Verify coordinator was created with correct config
+        # Verify coordinator was created with merged config (data + options)
         mock_coordinator_class.assert_called_once_with(
-            mock_hass, mock_config_entry.data
+            mock_hass, {**mock_config_entry.data, **mock_config_entry.options}
         )
 
         # Verify server was started
@@ -154,6 +155,7 @@ async def test_multiple_entries(mock_hass):
         "ssl_key": "/ssl/privkey.pem",
         "charge_point_id": "DE*BMW*TEST1",
     }
+    entry1.options = {}
 
     entry2 = MagicMock(spec=ConfigEntry)
     entry2.entry_id = "entry_2"
@@ -163,6 +165,7 @@ async def test_multiple_entries(mock_hass):
         "ssl_key": "/ssl/privkey.pem",
         "charge_point_id": "DE*BMW*TEST2",
     }
+    entry2.options = {}
 
     with patch(
         "custom_components.bmw_wallbox.BMWWallboxCoordinator"

@@ -10,7 +10,8 @@
           "ssl_key": "SSL Key Path",
           "charge_point_id": "Charge Point ID",
           "rfid_token": "RFID Token (Optional)",
-          "max_current": "Maximum Current (A)"
+          "max_current": "Maximum Current (A)",
+          "scan_interval": "Meter Polling Interval (seconds)"
         }
       }
     },
@@ -23,6 +24,16 @@
     },
     "abort": {
       "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "BMW Wallbox Options",
+        "data": {
+          "scan_interval": "Meter Polling Interval (seconds)"
+        }
+      }
     }
   }
 }

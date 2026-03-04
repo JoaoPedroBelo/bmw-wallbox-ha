@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-04
+
+### Added
+
+- **Active meter polling during charging** - Integration now proactively requests fresh meter values from the wallbox during active charging sessions via OCPP `TriggerMessage`, instead of relying solely on push-based `TransactionEvent` messages. This fixes sensors not updating on wallboxes that don't include `meter_value` in TransactionEvent ([#7](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/7))
+- **Configurable polling interval** - New "Meter Polling Interval" option (5–60 seconds, default 10s) available during setup and in integration options for post-setup adjustment
+- **Options flow** - Users can now change the polling interval after initial setup via the integration's "Configure" button
+
+### Fixed
+
+- **Sensors not updating during active charging** - Some wallboxes send `TransactionEvent` without meter data, causing power, energy, current, and voltage sensors to remain stale until integration restart
+- **Stop/Pause command failing on stale data** - The pause command would skip sending `SetChargingProfile(0A)` when power showed 0W due to stale data. Now refreshes meter values before checking, and also verifies charging state
+
 ## [1.5.1] - 2026-01-26
 
 ### Added

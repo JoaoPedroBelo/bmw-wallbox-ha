@@ -31,8 +31,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BMW Wallbox from a config entry."""
     _LOGGER.debug("Setting up BMW Wallbox integration")
 
+    # Merge options over data (options override data for configurable fields)
+    config = {**entry.data, **entry.options}
+
     # Create coordinator
-    coordinator = BMWWallboxCoordinator(hass, entry.data)
+    coordinator = BMWWallboxCoordinator(hass, config)
 
     # Store coordinator
     hass.data.setdefault(DOMAIN, {})
@@ -48,8 +51,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Reload integration when options change
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     _LOGGER.info("BMW Wallbox integration setup complete")
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

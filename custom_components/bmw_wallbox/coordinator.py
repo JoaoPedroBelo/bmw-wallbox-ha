@@ -39,7 +39,13 @@ from ocpp.v201.enums import (
 )
 import websockets
 
-from .const import CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT, DOMAIN, UPDATE_INTERVAL
+from .const import (
+    CONF_MAX_CURRENT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_MAX_CURRENT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -454,11 +460,12 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         config: dict[str, Any],
     ) -> None:
         """Initialize."""
+        scan_interval = config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval),
         )
 
         self.config = config
@@ -518,8 +525,11 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the wallbox."""
-        # The data is updated in real-time by OCPP message handlers
-        # This just returns the current state
+        # When there's an active transaction, proactively request fresh meter values.
+        # Some wallboxes don't include meter_value in TransactionEvent messages,
+        # so we can't rely purely on push-based updates.
+        if self.charge_point and self.current_transaction_id:
+            await self.async_trigger_meter_values()
         return self.data
 
     async def async_configure_wallbox_for_pause_resume(self) -> None:
@@ -1057,13 +1067,20 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             result["message"] = "No active charging session"
             return result
 
-        # Check if already paused (power is 0)
+        # Refresh meter values before checking power (may be stale)
+        await self.async_trigger_meter_values()
+
+        # Check if already paused (power is 0 AND charging state confirms it)
         power = self.data.get("power", 0) or 0
-        if power == 0:
+        charging_state = self.data.get("charging_state", "")
+        if power == 0 and charging_state not in ("Charging", "EVDetected"):
             result["success"] = True
             result["message"] = "Charging already paused"
             result["action"] = "already_paused"
-            _LOGGER.info("Already at 0W - no need to send pause command")
+            _LOGGER.info(
+                "Already at 0W (state=%s) - no need to send pause command",
+                charging_state,
+            )
             return result
 
         _LOGGER.info(
