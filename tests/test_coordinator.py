@@ -439,23 +439,24 @@ async def test_async_pause_charging_nuke_on_rejection(coordinator):
     """Test pause triggers NUKE (reboot) when SetChargingProfile is rejected."""
     mock_charge_point = MagicMock()
 
-    # First call: GetTransactionStatus (refresh)
-    # Second call: ClearChargingProfile
-    # Third call: SetChargingProfile (rejected)
-    # Fourth call: Reset (NUKE)
+    # First call: TriggerMessage (meter refresh before pause check)
+    # Second call: GetTransactionStatus (refresh)
+    # Third call: ClearChargingProfile
+    # Fourth call: SetChargingProfile (rejected)
+    # Fifth call: Reset (NUKE)
     call_count = 0
 
     async def mock_call(request):
         nonlocal call_count
         call_count += 1
 
-        if call_count <= 2:
-            # GetTransactionStatus and ClearChargingProfile
+        if call_count <= 3:
+            # TriggerMessage, GetTransactionStatus, and ClearChargingProfile
             mock_resp = MagicMock()
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
             return mock_resp
-        if call_count == 3:
+        if call_count == 4:
             # SetChargingProfile - REJECTED!
             mock_resp = MagicMock()
             mock_resp.status = "Rejected"
@@ -488,7 +489,8 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
         nonlocal call_count
         call_count += 1
 
-        if call_count <= 2:
+        if call_count <= 3:
+            # TriggerMessage, GetTransactionStatus, ClearChargingProfile
             mock_resp = MagicMock()
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
@@ -508,8 +510,8 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
 
     assert result["success"] is False
     assert "rejected" in result["message"].lower()
-    # Should NOT have called Reset (only 3 calls, not 4)
-    assert call_count == 3
+    # Should NOT have called Reset (only 4 calls: trigger + tx_status + clear + set)
+    assert call_count == 4
 
 
 async def test_async_pause_charging_nuke_on_timeout(coordinator):
@@ -522,12 +524,13 @@ async def test_async_pause_charging_nuke_on_timeout(coordinator):
         nonlocal call_count
         call_count += 1
 
-        if call_count <= 2:
+        if call_count <= 3:
+            # TriggerMessage, GetTransactionStatus, ClearChargingProfile
             mock_resp = MagicMock()
             mock_resp.ongoing_indicator = True
             mock_resp.status = "Accepted"
             return mock_resp
-        if call_count == 3:
+        if call_count == 4:
             # SetChargingProfile - TIMEOUT!
             raise TimeoutError("Connection timed out")
         # Reset - accepted
