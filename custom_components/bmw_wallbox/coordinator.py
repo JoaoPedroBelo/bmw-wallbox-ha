@@ -1077,7 +1077,10 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             result["success"] = True
             result["message"] = "Charging already paused"
             result["action"] = "already_paused"
-            _LOGGER.info("Already at 0W (state=%s) - no need to send pause command", charging_state)
+            _LOGGER.info(
+                "Already at 0W (state=%s) - no need to send pause command",
+                charging_state,
+            )
             return result
 
         _LOGGER.info(
