@@ -27,6 +27,19 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old entry to new version."""
+    _LOGGER.debug("Migrating from version %s", config_entry.version)
+
+    if config_entry.version == 1:
+        # Version 2 added scan_interval - no data changes needed,
+        # coordinator falls back to DEFAULT_SCAN_INTERVAL if missing
+        hass.config_entries.async_update_entry(config_entry, version=2)
+
+    _LOGGER.info("Migration to version %s successful", config_entry.version)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BMW Wallbox from a config entry."""
     _LOGGER.debug("Setting up BMW Wallbox integration")
