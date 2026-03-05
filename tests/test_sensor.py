@@ -171,7 +171,6 @@ async def test_status_sensor_attributes(
     assert "wallbox_online" in attrs
 
 
-
 async def test_connector_status_sensor(
     hass: HomeAssistant, mock_coordinator, mock_config_entry
 ) -> None:

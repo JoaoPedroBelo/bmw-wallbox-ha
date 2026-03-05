@@ -204,7 +204,6 @@ class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase):
         return self.coordinator.data.get("energy_total")
 
 
-
 class BMWWallboxCurrentSensor(BMWWallboxSensorBase):
     """Current sensor (A) - calculated from power when not directly reported."""
 
