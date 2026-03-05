@@ -44,9 +44,6 @@ classDiagram
     class BMWWallboxEnergyTotalSensor {
         For Energy Dashboard
     }
-    class BMWWallboxEnergySessionSensor {
-        Per-session tracking
-    }
     class BMWWallboxEnergyDailySensor {
         Resets at midnight
     }
@@ -75,7 +72,6 @@ classDiagram
     BMWWallboxSensorBase <|-- BMWWallboxStatusSensor
     BMWWallboxSensorBase <|-- BMWWallboxPowerSensor
     BMWWallboxSensorBase <|-- BMWWallboxEnergyTotalSensor
-    BMWWallboxSensorBase <|-- BMWWallboxEnergySessionSensor
     BMWWallboxSensorBase <|-- BMWWallboxEnergyDailySensor
     BMWWallboxSensorBase <|-- BMWWallboxEnergyWeeklySensor
     BMWWallboxSensorBase <|-- BMWWallboxEnergyMonthlySensor
@@ -631,15 +627,6 @@ automation:
         data:
           message: "High charging usage: {{ states('sensor.bmw_wallbox_energy_daily') }} kWh today"
 ```
-
-### Energy Session Sensor
-
-**Purpose:** Track energy for current charging session only
-
-**Implementation:**
-- Reports energy in Wh (not kWh) for precision
-- Resets when new session starts
-- Useful for per-charge monitoring
 
 ---
 

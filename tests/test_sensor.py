@@ -5,7 +5,6 @@ from homeassistant.core import HomeAssistant
 from custom_components.bmw_wallbox.sensor import (
     BMWWallboxConnectorStatusSensor,
     BMWWallboxCurrentSensor,
-    BMWWallboxEnergySessionSensor,
     BMWWallboxEnergyTotalSensor,
     BMWWallboxEventTypeSensor,
     BMWWallboxIDTokenSensor,
@@ -171,18 +170,6 @@ async def test_status_sensor_attributes(
     assert "transaction_id" in attrs
     assert "wallbox_online" in attrs
 
-
-async def test_energy_session_sensor(
-    hass: HomeAssistant, mock_coordinator, mock_config_entry
-) -> None:
-    """Test energy session sensor."""
-    mock_coordinator.data["energy_session"] = 25500.0  # Session energy in Wh
-    sensor = BMWWallboxEnergySessionSensor(mock_coordinator, mock_config_entry)
-
-    # Energy session is stored in Wh
-    assert sensor.native_value == 25500.0
-    assert sensor.native_unit_of_measurement == "Wh"
-    assert sensor.device_class == "energy"
 
 
 async def test_connector_status_sensor(

@@ -353,7 +353,6 @@ if meter_value:
             # Energy measurements
             elif measurand == "Energy.Active.Import.Register":
                 self.coordinator.data["energy_total"] = float(value) / 1000  # Wh to kWh
-                self.coordinator.data["energy_session"] = float(value)
             
             # Current measurements (per phase)
             elif measurand == "Current.Import":
@@ -396,7 +395,7 @@ if meter_value:
 | `Power.Reactive.Export` | `power_reactive_export` | VAr | |
 | `Power.Offered` | `power_offered` | W | Max available |
 | `Power.Factor` | `power_factor` | 0-1 | |
-| `Energy.Active.Import.Register` | `energy_total`, `energy_session` | Wh | Converted to kWh |
+| `Energy.Active.Import.Register` | `energy_total` | Wh | Converted to kWh |
 | `Energy.Active.Export.Register` | `energy_active_export` | Wh→kWh | |
 | `Energy.Reactive.Import.Register` | `energy_reactive_import` | VArh→kVArh | |
 | `Energy.Reactive.Export.Register` | `energy_reactive_export` | VArh→kVArh | |

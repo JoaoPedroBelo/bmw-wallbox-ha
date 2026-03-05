@@ -75,7 +75,7 @@ Used to create unique entity IDs: `{config_entry_id}_{SENSOR_*}`
 | Constant | Value | Entity Purpose |
 |----------|-------|----------------|
 | `SENSOR_POWER` | `"power"` | Power consumption (W) |
-| `SENSOR_ENERGY_SESSION` | `"energy_session"` | Session energy (Wh) |
+
 | `SENSOR_ENERGY_TOTAL` | `"energy_total"` | Total cumulative energy (kWh) - Energy Dashboard |
 | `SENSOR_ENERGY_DAILY` | `"energy_daily"` | Daily energy (kWh) - resets at midnight |
 | `SENSOR_ENERGY_WEEKLY` | `"energy_weekly"` | Weekly energy (kWh) - resets Monday |
@@ -285,7 +285,7 @@ UPDATE_INTERVAL: Final = 10  # seconds
 
 # Entity unique ID suffixes
 SENSOR_POWER: Final = "power"
-SENSOR_ENERGY_SESSION: Final = "energy_session"
+
 SENSOR_ENERGY_TOTAL: Final = "energy_total"
 SENSOR_ENERGY_DAILY: Final = "energy_daily"
 SENSOR_ENERGY_WEEKLY: Final = "energy_weekly"
