@@ -20,7 +20,7 @@ DEFAULT_SCAN_INTERVAL: Final = 10  # seconds
 
 # Entity unique ID suffixes
 SENSOR_POWER: Final = "power"
-SENSOR_ENERGY_SESSION: Final = "energy_session"
+
 SENSOR_ENERGY_TOTAL: Final = "energy_total"
 SENSOR_STATE: Final = "state"
 SENSOR_TRANSACTION_ID: Final = "transaction_id"

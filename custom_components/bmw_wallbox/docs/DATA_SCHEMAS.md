@@ -120,10 +120,6 @@ coordinator.data: dict[str, Any] = {
                                  # Calculated: energy_cumulative + last_session_energy
                                  # Note: Never resets, accumulates across all sessions
 
-    "energy_session": float,     # Current session energy (Wh)
-                                 # Default: 0.0
-                                 # Measurand: "Energy.Active.Import.Register" (raw)
-    
     "energy_cumulative": float,  # Cumulative energy from completed sessions (kWh)
                                  # Default: 0.0
                                  # Updated: When new session detected (energy drop)

@@ -2,14 +2,15 @@
 
 ## Overview
 
-The integration provides 2 core energy sensors:
+The integration provides 1 core energy sensor:
 
 | Sensor | Unit | Reset Behavior | Primary Use |
 |--------|------|---------------|-------------|
 | **Energy Total** | kWh | Never (cumulative) | Home Assistant Energy Dashboard |
-| **Energy Session** | Wh | Per charging session | Current charge monitoring |
 
 For period-based tracking (daily/weekly/monthly/yearly), use Home Assistant's built-in **Utility Meter** helper.
+
+> **Note:** The Energy Session sensor was removed. Use HA's Utility Meter helper with `sensor.energy_total` to track per-session or per-period energy.
 
 ---
 
@@ -22,14 +23,11 @@ flowchart TB
     end
     
     subgraph Coordinator["Coordinator"]
-        Raw["energy_session (Wh)<br/>Raw value from wallbox"]
-        Cumulative["energy_cumulative (kWh)<br/>Sum of completed sessions"]
-        LastSession["last_session_energy (kWh)<br/>For session detection"]
+        Raw["Energy.Active.Import.Register (Wh)<br/>Raw value from wallbox"]
     end
-    
+
     subgraph Sensors["Energy Sensors"]
-        Total["Energy Total (kWh)<br/>= cumulative + current session<br/>NEVER resets"]
-        Session["Energy Session (Wh)<br/>Current session only"]
+        Total["Energy Total (kWh)<br/>Cumulative meter register<br/>NEVER resets"]
     end
     
     subgraph HA["Home Assistant"]
@@ -37,12 +35,9 @@ flowchart TB
         Utility["Utility Meter<br/>(daily/weekly/monthly)"]
     end
     
-    OCPP -->|TransactionEvent| Raw
-    Raw --> Session
-    Raw -->|"Convert to kWh"| Cumulative
-    Cumulative --> Total
-    LastSession -->|"Detect session end"| Cumulative
-    
+    OCPP -->|TransactionEvent / MeterValues| Raw
+    Raw -->|"Convert Wh to kWh"| Total
+
     Total --> Dashboard
     Total --> Utility
 ```
@@ -125,66 +120,6 @@ flowchart LR
 2. Click **Add Consumption**
 3. Select `sensor.energy_total`
 4. Done! Energy will now be tracked correctly
-
----
-
-## Energy Session Sensor
-
-### Purpose
-
-Track energy consumed in the **current charging session only**.
-
-### Technical Details
-
-- **Entity ID:** `sensor.bmw_wallbox_energy_session`
-- **Device Class:** `energy`
-- **State Class:** `total_increasing`
-- **Unit:** Wh (not kWh, for precision)
-- **Precision:** 0 decimal places
-
-### Behavior
-
-```mermaid
-stateDiagram-v2
-    [*] --> Zero: New Session
-    Zero --> Increasing: Charging
-    Increasing --> Increasing: Power > 0
-    Increasing --> Zero: New Session Detected
-    
-    note right of Increasing
-        Value increases during charging
-        Shows current session energy
-    end note
-    
-    note right of Zero
-        Resets when new session starts
-        (energy drop > 0.1 kWh)
-    end note
-```
-
-- Starts at 0 when charging begins
-- Increases throughout the session
-- Resets to 0 when a new session starts
-- Useful for "how much did this charge cost?" calculations
-
-### Example Automation
-
-```yaml
-automation:
-  - alias: "Notify When Charge Complete"
-    trigger:
-      - platform: state
-        entity_id: sensor.bmw_wallbox_state
-        from: "Charging"
-        to: "Ready"
-    action:
-      - service: notify.mobile_app
-        data:
-          message: >
-            Charging complete! 
-            Energy used: {{ states('sensor.bmw_wallbox_energy_session') }} Wh
-            Cost: €{{ (states('sensor.bmw_wallbox_energy_session') | float / 1000 * 0.25) | round(2) }}
-```
 
 ---
 
@@ -395,9 +330,7 @@ flowchart TD
     Check1 -->|NO| Fix1["Complete a charging session<br/>to accumulate energy"]
     Check1 -->|YES| Check2{TransactionEvents<br/>in logs?}
     Check2 -->|NO| Fix2["Check wallbox connection<br/>Enable debug logging"]
-    Check2 -->|YES| Check3{energy_session<br/>has value?}
-    Check3 -->|NO| Fix3["Wallbox not sending<br/>energy measurements"]
-    Check3 -->|YES| CheckDev["Check Developer Tools → States<br/>Look for energy_cumulative"]
+    Check2 -->|YES| CheckDev["Check Developer Tools → States<br/>Look for energy_total value"]
 ```
 
 **Causes:**

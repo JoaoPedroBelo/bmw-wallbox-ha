@@ -129,8 +129,6 @@ class WallboxChargePoint(cp):
                 if measurand == "Power.Active.Import":
                     self.coordinator.data["power"] = float(value)
                 elif measurand == "Energy.Active.Import.Register":
-                    # Use wallbox value directly
-                    self.coordinator.data["energy_session"] = float(value)
                     # Only update energy_total if new value is positive and >= current
                     # This prevents utility meters from being corrupted by 0/reset values
                     new_energy = float(value) / 1000.0
@@ -267,8 +265,6 @@ class WallboxChargePoint(cp):
 
                     # Energy measurements
                     elif measurand == "Energy.Active.Import.Register":
-                        # Use wallbox value directly
-                        self.coordinator.data["energy_session"] = float(value)
                         # Only update energy_total if new value is positive and >= current
                         # This prevents utility meters from being corrupted by 0/reset values
                         new_energy = float(value) / 1000.0
@@ -480,7 +476,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "charging_state": "Unknown",
             "power": 0.0,
             "energy_total": None,  # None until first valid reading (prevents 0 corruption)
-            "energy_session": 0.0,
             "current": 0.0,
             "voltage": 0.0,
             "transaction_id": None,

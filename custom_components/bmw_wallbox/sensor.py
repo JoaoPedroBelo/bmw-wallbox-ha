@@ -40,7 +40,6 @@ async def async_setup_entry(
             # === ENERGY & POWER (FOR CHARGING MONITORING) ===
             BMWWallboxPowerSensor(coordinator, entry),
             BMWWallboxEnergyTotalSensor(coordinator, entry),  # For Energy Dashboard
-            BMWWallboxEnergySessionSensor(coordinator, entry),  # Per-session tracking
             # === ELECTRICAL MEASUREMENTS ===
             BMWWallboxCurrentSensor(coordinator, entry),
             BMWWallboxVoltageSensor(coordinator, entry),
@@ -203,23 +202,6 @@ class BMWWallboxEnergyTotalSensor(BMWWallboxSensorBase):
     def native_value(self) -> float | None:
         """Return energy in kWh."""
         return self.coordinator.data.get("energy_total")
-
-
-class BMWWallboxEnergySessionSensor(BMWWallboxSensorBase):
-    """Energy for current charging session (Wh)."""
-
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "energy_session", "Energy Session")
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_icon = "mdi:counter"
-        self._attr_suggested_display_precision = 0
-
-    @property
-    def native_value(self) -> float | None:
-        """Return energy in Wh."""
-        return self.coordinator.data.get("energy_session")
 
 
 class BMWWallboxCurrentSensor(BMWWallboxSensorBase):
