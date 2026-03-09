@@ -130,7 +130,15 @@ class OptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
+        current_rfid = self.config_entry.options.get(
+            CONF_RFID_TOKEN,
+            self.config_entry.data.get(CONF_RFID_TOKEN, ""),
+        )
+        current_max = self.config_entry.options.get(
+            CONF_MAX_CURRENT,
+            self.config_entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+        )
+        current_scan = self.config_entry.options.get(
             CONF_SCAN_INTERVAL,
             self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
@@ -139,7 +147,11 @@ class OptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(CONF_SCAN_INTERVAL, default=current): vol.All(
+                    vol.Optional(CONF_RFID_TOKEN, default=current_rfid): str,
+                    vol.Optional(CONF_MAX_CURRENT, default=current_max): vol.All(
+                        vol.Coerce(int), vol.Range(min=6, max=32)
+                    ),
+                    vol.Optional(CONF_SCAN_INTERVAL, default=current_scan): vol.All(
                         vol.Coerce(int), vol.Range(min=5, max=60)
                     ),
                 }

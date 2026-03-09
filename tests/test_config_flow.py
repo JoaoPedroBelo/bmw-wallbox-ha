@@ -1,13 +1,13 @@
 """Test BMW Wallbox config flow."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 import pytest
 
-from custom_components.bmw_wallbox.config_flow import ConfigFlow
+from custom_components.bmw_wallbox.config_flow import ConfigFlow, OptionsFlow
 
 
 @pytest.fixture
@@ -130,3 +130,79 @@ async def test_duplicate_entry(hass: HomeAssistant, mock_setup_entry) -> None:
                 "max_current": 32,
             }
         )
+
+
+def _mock_config_entry(data, options=None):
+    """Create a mock ConfigEntry compatible with all HA versions."""
+    entry = MagicMock(spec_set=["data", "options"])
+    entry.data = data
+    entry.options = options or {}
+    return entry
+
+
+def _attach_config_entry(flow, entry):
+    """Attach config entry to OptionsFlow, compatible with old and new HA."""
+    try:
+        flow.config_entry = entry
+    except RuntimeError:
+        flow._config_entry = entry
+
+
+async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
+    """Test options flow shows current config values."""
+    entry = _mock_config_entry(
+        data={
+            "port": 9000,
+            "ssl_cert": "/ssl/fullchain.pem",
+            "ssl_key": "/ssl/privkey.pem",
+            "charge_point_id": "DE*BMW*TEST123",
+            "rfid_token": "MYTOKEN123",
+            "max_current": 16,
+            "scan_interval": 30,
+        },
+    )
+
+    flow = OptionsFlow()
+    _attach_config_entry(flow, entry)
+    flow.hass = hass
+
+    result = await flow.async_step_init()
+    assert result["type"] == FlowResultType.FORM
+
+    schema = result["data_schema"]
+    schema_dict = {str(k): k for k in schema.schema}
+    assert "rfid_token" in schema_dict
+    assert "max_current" in schema_dict
+    assert "scan_interval" in schema_dict
+
+
+async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
+    """Test options flow saves updated values."""
+    entry = _mock_config_entry(
+        data={
+            "port": 9000,
+            "ssl_cert": "/ssl/fullchain.pem",
+            "ssl_key": "/ssl/privkey.pem",
+            "charge_point_id": "DE*BMW*TEST123",
+            "rfid_token": "",
+            "max_current": 32,
+            "scan_interval": 30,
+        },
+    )
+
+    flow = OptionsFlow()
+    _attach_config_entry(flow, entry)
+    flow.hass = hass
+
+    result = await flow.async_step_init(
+        user_input={
+            "rfid_token": "NEWTOKEN456",
+            "max_current": 16,
+            "scan_interval": 10,
+        }
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["rfid_token"] == "NEWTOKEN456"
+    assert result["data"]["max_current"] == 16
+    assert result["data"]["scan_interval"] == 10
