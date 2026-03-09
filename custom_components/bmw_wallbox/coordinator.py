@@ -571,7 +571,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         _LOGGER.info(
             "Starting OCPP server on port %s (RFID token: %s)",
             self.config["port"],
-            f"{rfid[:4]}...{rfid[-4:]}" if len(rfid) > 8 else ("configured" if rfid else "not configured"),
+            f"{rfid[:4]}...{rfid[-4:]}"
+            if len(rfid) > 8
+            else ("configured" if rfid else "not configured"),
         )
 
         # Setup SSL context - load_cert_chain is blocking, run in executor
