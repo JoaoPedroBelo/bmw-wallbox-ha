@@ -31,6 +31,8 @@
       "init": {
         "title": "BMW Wallbox Options",
         "data": {
+          "rfid_token": "RFID Token (Optional)",
+          "max_current": "Maximum Current (A)",
           "scan_interval": "Meter Polling Interval (seconds)"
         }
       }

@@ -567,7 +567,12 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
     async def async_start_server(self) -> None:
         """Start the OCPP WebSocket server."""
-        _LOGGER.info("Starting OCPP server on port %s", self.config["port"])
+        rfid = self.config.get("rfid_token", "")
+        _LOGGER.info(
+            "Starting OCPP server on port %s (RFID token: %s)",
+            self.config["port"],
+            f"{rfid[:4]}...{rfid[-4:]}" if len(rfid) > 8 else ("configured" if rfid else "not configured"),
+        )
 
         # Setup SSL context - load_cert_chain is blocking, run in executor
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -598,6 +603,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             # Configure wallbox for pause/resume support
             asyncio.create_task(self.async_configure_wallbox_for_pause_resume())
 
+            # Recover transaction state (id_token, transaction_id) after HA restart
+            asyncio.create_task(self._recover_transaction_on_connect())
+
             try:
                 await self.charge_point.start()
             except websockets.exceptions.ConnectionClosed:
@@ -623,6 +631,46 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if self.charge_point:
             _LOGGER.info("Requesting meter values on connect...")
             await self.async_trigger_meter_values()
+
+    async def _recover_transaction_on_connect(self) -> None:
+        """Recover active transaction state after wallbox connects.
+
+        After HA restart, current_transaction_id and id_token reset to None.
+        Trigger a TransactionEvent so the wallbox reports any ongoing transaction.
+        """
+        await asyncio.sleep(5)
+        if not self.charge_point:
+            return
+
+        _LOGGER.info("🔄 Recovering transaction state on connect...")
+        try:
+            from ocpp.v201 import call as ocpp_call
+            from ocpp.v201.enums import MessageTriggerEnumType
+
+            response = await asyncio.wait_for(
+                self.charge_point.call(
+                    ocpp_call.TriggerMessage(
+                        requested_message=MessageTriggerEnumType.transaction_event,
+                        evse={"id": 1, "connector_id": 1},
+                    )
+                ),
+                timeout=15.0,
+            )
+
+            _LOGGER.info("Transaction recovery trigger response: %s", response.status)
+            if response.status == "Accepted":
+                _LOGGER.info(
+                    "✅ Transaction recovery triggered - waiting for TransactionEvent"
+                )
+            else:
+                _LOGGER.info(
+                    "No active transaction to recover (response: %s)", response.status
+                )
+
+        except TimeoutError:
+            _LOGGER.warning("Transaction recovery trigger timed out")
+        except Exception as err:
+            _LOGGER.warning("Could not recover transaction state: %s", err)
 
     async def async_stop_server(self) -> None:
         """Stop the OCPP server."""
