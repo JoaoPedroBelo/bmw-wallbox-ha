@@ -155,7 +155,7 @@ async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
     )
 
     flow = OptionsFlow()
-    flow.config_entry = entry
+    flow._config_entry = entry
     flow.hass = hass
 
     result = await flow.async_step_init()
@@ -183,7 +183,7 @@ async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
     )
 
     flow = OptionsFlow()
-    flow.config_entry = entry
+    flow._config_entry = entry
     flow.hass = hass
 
     result = await flow.async_step_init(
