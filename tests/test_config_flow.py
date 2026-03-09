@@ -1,6 +1,6 @@
 """Test BMW Wallbox config flow."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -132,13 +132,17 @@ async def test_duplicate_entry(hass: HomeAssistant, mock_setup_entry) -> None:
         )
 
 
+def _mock_config_entry(data, options=None):
+    """Create a mock ConfigEntry compatible with all HA versions."""
+    entry = MagicMock(spec_set=["data", "options"])
+    entry.data = data
+    entry.options = options or {}
+    return entry
+
+
 async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
     """Test options flow shows current config values."""
-    entry = config_entries.ConfigEntry(
-        version=2,
-        minor_version=1,
-        domain="bmw_wallbox",
-        title="BMW Wallbox (TEST)",
+    entry = _mock_config_entry(
         data={
             "port": 9000,
             "ssl_cert": "/ssl/fullchain.pem",
@@ -148,7 +152,6 @@ async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
             "max_current": 16,
             "scan_interval": 30,
         },
-        source=config_entries.SOURCE_USER,
     )
 
     flow = OptionsFlow()
@@ -167,11 +170,7 @@ async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
 
 async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
     """Test options flow saves updated values."""
-    entry = config_entries.ConfigEntry(
-        version=2,
-        minor_version=1,
-        domain="bmw_wallbox",
-        title="BMW Wallbox (TEST)",
+    entry = _mock_config_entry(
         data={
             "port": 9000,
             "ssl_cert": "/ssl/fullchain.pem",
@@ -181,7 +180,6 @@ async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
             "max_current": 32,
             "scan_interval": 30,
         },
-        source=config_entries.SOURCE_USER,
     )
 
     flow = OptionsFlow()
