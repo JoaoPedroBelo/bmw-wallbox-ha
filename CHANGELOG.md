@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-03-09
+
+### Added
+
+- **RFID token and max current in Options flow** - Users can now verify and edit the RFID token and maximum current after initial setup via Settings → Devices & Services → Configure, without needing to remove and re-add the integration ([#10](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/10))
+- **Transaction state recovery on connect** - After HA restart, the integration now triggers a `TransactionEvent` from the wallbox to recover the active transaction ID and ID token, fixing Start/Stop buttons failing until a new charging event arrived
+- **RFID token logging at startup** - Configured RFID token is now logged (masked) at server startup for easier debugging
+
+### Removed
+
+- **Energy Session sensor** - Removed redundant sensor that always matched Energy Total
+
 ## [1.6.1] - 2026-03-04
 
 ### Fixed
