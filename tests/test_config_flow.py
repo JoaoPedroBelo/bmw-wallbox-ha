@@ -140,6 +140,14 @@ def _mock_config_entry(data, options=None):
     return entry
 
 
+def _attach_config_entry(flow, entry):
+    """Attach config entry to OptionsFlow, compatible with old and new HA."""
+    try:
+        flow.config_entry = entry
+    except RuntimeError:
+        flow._config_entry = entry
+
+
 async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
     """Test options flow shows current config values."""
     entry = _mock_config_entry(
@@ -155,7 +163,7 @@ async def test_options_flow_shows_current_values(hass: HomeAssistant) -> None:
     )
 
     flow = OptionsFlow()
-    flow._config_entry = entry
+    _attach_config_entry(flow, entry)
     flow.hass = hass
 
     result = await flow.async_step_init()
@@ -183,7 +191,7 @@ async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
     )
 
     flow = OptionsFlow()
-    flow._config_entry = entry
+    _attach_config_entry(flow, entry)
     flow.hass = hass
 
     result = await flow.async_step_init(
