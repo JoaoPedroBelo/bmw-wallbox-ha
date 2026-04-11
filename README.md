@@ -1,7 +1,8 @@
 # BMW Wallbox Home Assistant Integration
 
-[![Built with Cursor](https://img.shields.io/badge/✨%20Built%20with-Cursor-blueviolet?style=for-the-badge)](https://cursor.sh)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://github.com/hacs/integration)
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-6B4FBB?style=for-the-badge&logo=claude&logoColor=white)](https://claude.ai/code)
+[![Tests](https://img.shields.io/github/actions/workflow/status/JoaoPedroBelo/bmw-wallbox-ha/tests.yml?style=for-the-badge&label=Tests)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/tests.yml)
+[![HACS Validation](https://img.shields.io/github/actions/workflow/status/JoaoPedroBelo/bmw-wallbox-ha/validate.yml?style=for-the-badge&label=HACS)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/actions/workflows/validate.yml)
 [![Release](https://img.shields.io/github/v/release/JoaoPedroBelo/bmw-wallbox-ha?style=for-the-badge)](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/releases)
 [![License](https://img.shields.io/github/license/JoaoPedroBelo/bmw-wallbox-ha?style=for-the-badge)](LICENSE)
 [![Maintainer](https://img.shields.io/badge/Maintainer-%40JoaoPedroBelo-blue?style=for-the-badge)](https://github.com/JoaoPedroBelo)
@@ -16,7 +17,7 @@ A comprehensive Home Assistant custom integration for BMW-branded wallboxes (Del
 
 - **🔌 Real-time Monitoring**: Track power, energy, current, voltage, and charging state
 - **🎮 Smart Control**: Start/stop charging, set current limits dynamically
-- **📊 37 Sensors**: Comprehensive data including per-phase measurements
+- **📊 20 Entities**: Sensors, binary sensors, buttons, and controls
 - **⚡ Energy Dashboard**: Full integration with Home Assistant's Energy Dashboard
 - **🔒 Secure**: Uses OCPP 2.0.1 with WebSocket Secure (WSS) connection
 - **🏠 Local Control**: No cloud required - runs entirely on your local network
@@ -64,30 +65,27 @@ Comprehensive documentation is available in the [`docs`](custom_components/bmw_w
 - **[Architecture](custom_components/bmw_wallbox/docs/ARCHITECTURE.md)**: Technical architecture overview
 - **[Energy Sensors](custom_components/bmw_wallbox/docs/ENERGY_SENSORS.md)**: Energy tracking and Utility Meter setup
 - **[OCPP Handlers](custom_components/bmw_wallbox/docs/OCPP_HANDLERS.md)**: OCPP message handling details
+- **[Wallbox Capabilities](custom_components/bmw_wallbox/docs/WALLBOX_CAPABILITIES.md)**: Full OCPP inventory dump and hardware limitations
 - **[Testing Guide](custom_components/bmw_wallbox/docs/TESTING.md)**: Development and testing information
 - **[Troubleshooting](custom_components/bmw_wallbox/docs/TROUBLESHOOTING.md)**: Common issues and solutions
 
-## 🎯 Key Sensors
+## 🎯 Entities
 
-### Core Sensors (Always Enabled)
-- Power (W), Energy Total (kWh), Energy Session (Wh)
+### Sensors (13)
+- Power (W), Energy Total (kWh)
 - Current (A), Voltage (V)
-- Charging State, Connector Status
-- Transaction ID, Event Type, Trigger Reason
+- Status, Charging State, Connector Status
+- Transaction ID, Stopped Reason
+- Event Type, Trigger Reason, ID Token
+- Phases Used, Sequence Number
 
-### Advanced Sensors (Disabled by Default)
-- Per-phase current and voltage (L1, L2, L3)
-- Power factor, frequency, temperature
-- Active/reactive power and energy measurements
-
-### Binary Sensors
-- Charging (ON when actively charging)
+### Binary Sensors (2)
 - Connected (ON when wallbox is connected via OCPP)
+- Charging (ON when actively charging)
 
-### Controls
-- Start/Stop Charging buttons
-- Charging switch
-- Current Limit slider (0-32A)
+### Controls (5)
+- Start / Stop / Reboot / Refresh buttons
+- Current Limit slider (6-32A)
 
 ## 🏗️ Example Automations
 
