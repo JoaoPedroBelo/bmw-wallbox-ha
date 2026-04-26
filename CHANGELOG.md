@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-04-26
+
+### Changed
+
+- **Maximum charging current cap raised from 32A to 63A** - The artificial cap of 32A in the config flow validation has been raised to 63A (Type 2 connector practical maximum for single-phase). The default remains 32A, but users with hardware/installations that support higher currents (single-phase up to ~14kW, 3-phase up to ~43kW) can now configure values above 32A via Options. The wallbox will reject via OCPP `SetChargingProfile` if the value exceeds its hardware capability.
+
+### Fixed
+
+- **Charging Current Limit slider not respecting Options changes** - The slider's maximum value and current value were read only from `entry.data`, ignoring `entry.options`. After updating the maximum current in Settings → Configure, the slider now correctly reflects the new ceiling on reload.
+
 ## [1.6.2] - 2026-03-09
 
 ### Added

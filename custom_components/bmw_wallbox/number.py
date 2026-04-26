@@ -62,8 +62,9 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{NUMBER_CURRENT_LIMIT}"
         self._attr_name = "Charging Current Limit"
-        self._attr_native_max_value = entry.data.get(
-            CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+        self._attr_native_max_value = entry.options.get(
+            CONF_MAX_CURRENT,
+            entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
         )
         # Device info for grouping
         self._attr_device_info = {
@@ -80,7 +81,10 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
         """Return current limit value."""
         return self.coordinator.data.get(
             "current_limit",
-            self._entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+            self._entry.options.get(
+                CONF_MAX_CURRENT,
+                self._entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+            ),
         )
 
     async def async_set_native_value(self, value: float) -> None:

@@ -36,7 +36,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_CHARGE_POINT_ID): str,
         vol.Optional(CONF_RFID_TOKEN, default=""): str,
         vol.Optional(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): vol.All(
-            vol.Coerce(int), vol.Range(min=6, max=32)
+            vol.Coerce(int), vol.Range(min=6, max=63)
         ),
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=5, max=60)
@@ -149,7 +149,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(CONF_RFID_TOKEN, default=current_rfid): str,
                     vol.Optional(CONF_MAX_CURRENT, default=current_max): vol.All(
-                        vol.Coerce(int), vol.Range(min=6, max=32)
+                        vol.Coerce(int), vol.Range(min=6, max=63)
                     ),
                     vol.Optional(CONF_SCAN_INTERVAL, default=current_scan): vol.All(
                         vol.Coerce(int), vol.Range(min=5, max=60)
