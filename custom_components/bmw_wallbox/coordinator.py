@@ -32,6 +32,7 @@ from ocpp.v201.enums import (
     ChargingProfilePurposeEnumType,
     ChargingRateUnitEnumType,
     IdTokenEnumType,
+    NotifyEVChargingNeedsStatusEnumType,
     RegistrationStatusEnumType,
     RequestStartStopStatusEnumType,
     ResetEnumType,
@@ -48,6 +49,49 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _compute_live_current(
+    data: dict[str, Any],
+    reported_total: float | None,
+    power: float | None,
+    voltage: float | None,
+    phases: int,
+) -> float | None:
+    """Best-effort live charging current in amps, recomputed every meter update.
+
+    Recomputed on every MeterValues/TransactionEvent so the sensor never sticks
+    at a stale value once power or phase currents change (issue #15).
+
+    Order of preference, by observed reliability on the BMW/Delta firmware:
+    1. the average of the active per-phase currents (these update correctly),
+    2. a value derived from power and voltage (always fresh while charging),
+    3. a directly reported non-phased Current.Import - LAST resort, because this
+       firmware leaves that total register frozen at the pre-limit value while
+       the per-phase readings track reality.
+    Returns None when nothing usable is available.
+    """
+    active = [
+        x
+        for x in (
+            data.get("current_l1") or 0,
+            data.get("current_l2") or 0,
+            data.get("current_l3") or 0,
+        )
+        if x > 0
+    ]
+    if active:
+        return round(sum(active) / len(active), 1)
+
+    if power and power > 0 and voltage and voltage > 0:
+        if phases == 3:
+            return round(power / (voltage * 1.732), 1)  # sqrt(3) ≈ 1.732
+        return round(power / voltage, 1)
+
+    if reported_total is not None:
+        return round(reported_total, 1)
+
+    return None
 
 
 class WallboxChargePoint(cp):
@@ -107,6 +151,7 @@ class WallboxChargePoint(cp):
         """Handle MeterValues from wallbox (triggered or periodic)."""
         _LOGGER.info("📊 MeterValues received for EVSE %s", evse_id)
 
+        reported_total_current = None  # non-phased Current.Import seen this event
         for mv in meter_value:
             timestamp = mv.get("timestamp")
             _LOGGER.debug("  Timestamp: %s", timestamp)
@@ -145,14 +190,14 @@ class WallboxChargePoint(cp):
                             current_energy,
                         )
                 elif measurand == "Current.Import":
-                    if phase == "L1-N":
+                    if phase in ("L1", "L1-N"):
                         self.coordinator.data["current_l1"] = float(value)
-                    elif phase == "L2-N":
+                    elif phase in ("L2", "L2-N"):
                         self.coordinator.data["current_l2"] = float(value)
-                    elif phase == "L3-N":
+                    elif phase in ("L3", "L3-N"):
                         self.coordinator.data["current_l3"] = float(value)
                     else:
-                        self.coordinator.data["current"] = float(value)
+                        reported_total_current = float(value)
                 elif measurand == "Voltage":
                     if phase == "L1-N":
                         self.coordinator.data["voltage_l1"] = float(value)
@@ -162,6 +207,16 @@ class WallboxChargePoint(cp):
                         self.coordinator.data["voltage_l3"] = float(value)
                     else:
                         self.coordinator.data["voltage"] = float(value)
+
+        # Recompute the live current so the sensor never sticks (issue #15)
+        self.coordinator.data["current"] = _compute_live_current(
+            self.coordinator.data,
+            reported_total_current,
+            self.coordinator.data.get("power") or 0,
+            self.coordinator.data.get("voltage") or 0,
+            self.coordinator.data.get("phases_used", 1) or 1,
+        )
+
         self.coordinator.async_set_updated_data(self.coordinator.data)
         return call_result.MeterValues()
 
@@ -199,6 +254,13 @@ class WallboxChargePoint(cp):
         self.current_transaction_id = transaction_info.get("transaction_id")
         self.coordinator.current_transaction_id = self.current_transaction_id
 
+        # On a fresh session start, push the configured limit immediately so the
+        # wallbox doesn't run at full power until the next poll (issue #15).
+        if event_type == "Started":
+            asyncio.create_task(
+                self.coordinator.async_apply_limit_on_transaction_start()
+            )
+
         # Update coordinator data with basic transaction info
         self.coordinator.data.update(
             {
@@ -219,6 +281,7 @@ class WallboxChargePoint(cp):
             self.coordinator.data["id_token_type"] = id_token.get("type")
 
         # Extract meter values if present
+        reported_total_current = None  # non-phased Current.Import seen this event
         meter_value = kwargs.get("meter_value", [])
         if meter_value:
             _LOGGER.info("📊 Processing %d meter value(s)", len(meter_value))
@@ -303,8 +366,8 @@ class WallboxChargePoint(cp):
                         elif phase == "L3":
                             self.coordinator.data["current_l3"] = current_value
                         else:
-                            # Total or unspecified - store as main current
-                            self.coordinator.data["current"] = current_value
+                            # Total or unspecified - prefer this as the live current
+                            reported_total_current = current_value
 
                         _LOGGER.debug("Current: value=%s, phase=%s", value, phase)
 
@@ -361,46 +424,13 @@ class WallboxChargePoint(cp):
                     self.coordinator.data["voltage"] = voltage
                     _LOGGER.debug("Calculated voltage from phases: %.0fV", voltage)
 
-        # Calculate total current from per-phase if main current is missing
-        if (
-            self.coordinator.data["current"] == 0
-            or self.coordinator.data["current"] is None
-        ):
-            l1 = self.coordinator.data.get("current_l1", 0) or 0
-            l2 = self.coordinator.data.get("current_l2", 0) or 0
-            l3 = self.coordinator.data.get("current_l3", 0) or 0
-            if l1 or l2 or l3:
-                # Use average of active phases
-                active = [x for x in [l1, l2, l3] if x > 0]
-                if active:
-                    self.coordinator.data["current"] = sum(active) / len(active)
-                    _LOGGER.debug(
-                        "Calculated current from phases: %.1fA",
-                        self.coordinator.data["current"],
-                    )
-
-        # Calculate current from power and voltage if still missing
-        if (
-            (
-                self.coordinator.data["current"] == 0
-                or self.coordinator.data["current"] is None
-            )
-            and power > 0
-            and voltage > 0
-        ):
-            # I = P / (V * phases * sqrt(3) for 3-phase, or V for 1-phase)
-            if phases == 3:
-                calculated_current = power / (voltage * 1.732)  # sqrt(3) ≈ 1.732
-            else:
-                calculated_current = power / voltage
-            self.coordinator.data["current"] = round(calculated_current, 1)
-            _LOGGER.info(
-                "✓ Calculated current: %.1fA (from P=%dW, V=%.0fV, %d-phase)",
-                calculated_current,
-                power,
-                voltage,
-                phases,
-            )
+        # === Live charging current (issue #15) ===
+        # Recompute on every event so the sensor never sticks at a stale value
+        # once power/phase currents change. Priority: directly reported total →
+        # per-phase average → derived from power/voltage.
+        self.coordinator.data["current"] = _compute_live_current(
+            self.coordinator.data, reported_total_current, power, voltage, phases
+        )
 
         # Smart connector status - derive from charging state if not explicitly set
         if self.coordinator.data.get("connector_status") == "Unknown":
@@ -416,6 +446,12 @@ class WallboxChargePoint(cp):
                 self.coordinator.data["connector_status"] = "Available"
             elif charging_state == "Faulted":
                 self.coordinator.data["connector_status"] = "Faulted"
+
+        # Session ended — clear live readings so the sensors don't stay frozen at
+        # the last value once charging stops (issue #15).
+        if event_type == "Ended":
+            for key in ("current", "power", "current_l1", "current_l2", "current_l3"):
+                self.coordinator.data[key] = 0
 
         # Trigger update
         self.coordinator.async_set_updated_data(self.coordinator.data)
@@ -445,6 +481,21 @@ class WallboxChargePoint(cp):
         """
         _LOGGER.debug("NotifyEvent received: %s", kwargs)
         return call_result.NotifyEvent()
+
+    @on("NotifyEVChargingNeeds")
+    async def on_notify_ev_charging_needs(self, **kwargs):
+        """Handle NotifyEVChargingNeeds (OCPP 2.0.1 / ISO 15118).
+
+        BMW Wallbox Plus Gen 4 (Delta) firmware sends this during the EV
+        charging negotiation. Without a registered handler the ocpp library
+        replies with a CallError (NotImplementedError) and floods the HA log.
+        Acknowledging it cleanly (Accepted) stops the error spam and keeps the
+        OCPP session healthy. Same approach as NotifyEvent. See issue #14.
+        """
+        _LOGGER.debug("NotifyEVChargingNeeds received: %s", kwargs)
+        return call_result.NotifyEVChargingNeeds(
+            status=NotifyEVChargingNeedsStatusEnumType.accepted
+        )
 
 
 class BMWWallboxCoordinator(DataUpdateCoordinator):
@@ -607,6 +658,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
             # Recover transaction state (id_token, transaction_id) after HA restart
             asyncio.create_task(self._recover_transaction_on_connect())
+
+            # Install TxDefaultProfile so the first session starts at the limit
+            asyncio.create_task(self._apply_default_limit_on_connect())
 
             try:
                 await self.charge_point.start()
@@ -1386,89 +1440,122 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         _LOGGER.info("⏹️ STOP CHARGING - SetChargingProfile(0A)")
         return await self.async_pause_charging(allow_nuke=allow_nuke)
 
+    async def _send_charging_profile(
+        self,
+        limit: float,
+        *,
+        purpose: ChargingProfilePurposeEnumType,
+        profile_id: int,
+        stack_level: int,
+        transaction_id: str | None = None,
+    ) -> bool:
+        """Build and send a SetChargingProfile, returning True if accepted.
+
+        Shared by the TxDefaultProfile (applies from the start of every session,
+        no transaction needed) and TxProfile (active session) code paths.
+        """
+        start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        schedule = ChargingScheduleType(
+            id=1,
+            start_schedule=start_time,
+            charging_rate_unit=ChargingRateUnitEnumType.amps,
+            charging_schedule_period=[
+                ChargingSchedulePeriodType(start_period=0, limit=float(limit))
+            ],
+        )
+
+        profile_kwargs: dict[str, Any] = {}
+        if transaction_id is not None:
+            profile_kwargs["transaction_id"] = transaction_id
+
+        profile = ChargingProfileType(
+            id=profile_id,
+            stack_level=stack_level,
+            charging_profile_purpose=purpose,
+            charging_profile_kind=ChargingProfileKindEnumType.absolute,
+            charging_schedule=[schedule],
+            **profile_kwargs,
+        )
+
+        _LOGGER.debug(
+            "Sending SetChargingProfile: evse=1, id=%s, purpose=%s, tx=%s, limit=%sA",
+            profile_id,
+            purpose,
+            transaction_id,
+            limit,
+        )
+
+        response = await asyncio.wait_for(
+            self.charge_point.call(
+                call.SetChargingProfile(evse_id=1, charging_profile=profile)
+            ),
+            timeout=15.0,
+        )
+
+        status_str = str(response.status)
+        accepted = status_str == "Accepted" or "accepted" in status_str.lower()
+        if accepted:
+            _LOGGER.info("✅ %s set to %sA - accepted by wallbox", purpose, limit)
+        else:
+            _LOGGER.warning(
+                "⚠️ %s (%sA) rejected by wallbox: %s", purpose, limit, response.status
+            )
+        return accepted
+
     async def async_set_current_limit(self, limit: float) -> bool:
         """Set charging current limit via SetChargingProfile.
 
-        IMPORTANT: This only works during an active charging session!
-        The BMW wallbox requires a transaction_id for tx_profile to work.
+        Sends a TxDefaultProfile so the limit also applies from the very start of
+        the next session (fixes the cold-start overshoot, issue #15), plus a
+        TxProfile bound to the active transaction so it takes effect immediately
+        on the current session.
 
         Args:
-            limit: Current limit in Amps (0 = pause, max = full speed)
+            limit: Current limit in Amps (max = full speed)
 
         Returns:
-            True if command was accepted, False otherwise
+            True if at least one profile was accepted, False otherwise
         """
         if not self.charge_point:
             _LOGGER.error("❌ No wallbox connected - cannot set current limit")
             return False
 
-        if not self.current_transaction_id:
-            _LOGGER.error(
-                "❌ No active transaction - current limit requires an active charging session! "
-                "Start charging first, then you can adjust the current limit."
-            )
-            return False
-
         _LOGGER.info(
-            "⚡ Setting current limit to %sA for transaction %s",
+            "⚡ Setting current limit to %sA (tx=%s)",
             limit,
             self.current_transaction_id,
         )
 
         try:
-            start_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            schedule = ChargingScheduleType(
-                id=1,
-                start_schedule=start_time,
-                charging_rate_unit=ChargingRateUnitEnumType.amps,
-                charging_schedule_period=[
-                    ChargingSchedulePeriodType(start_period=0, limit=float(limit))
-                ],
-            )
-
-            # Always use tx_profile with the active transaction
-            profile = ChargingProfileType(
-                id=999,
-                stack_level=1,
-                charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
-                charging_profile_kind=ChargingProfileKindEnumType.absolute,
-                charging_schedule=[schedule],
-                transaction_id=self.current_transaction_id,
-            )
-
-            _LOGGER.debug(
-                "Sending SetChargingProfile: evse=1, profile_id=999, tx=%s, limit=%sA",
-                self.current_transaction_id,
+            # TxDefaultProfile persists across sessions and applies from the start
+            # of the next transaction - prevents the startup overshoot.
+            ok_default = await self._send_charging_profile(
                 limit,
+                purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                profile_id=998,
+                stack_level=0,
             )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    call.SetChargingProfile(evse_id=1, charging_profile=profile)
-                ),
-                timeout=15.0,
-            )
+            # TxProfile takes effect immediately on the running session.
+            ok_tx = False
+            if self.current_transaction_id:
+                ok_tx = await self._send_charging_profile(
+                    limit,
+                    purpose=ChargingProfilePurposeEnumType.tx_profile,
+                    profile_id=999,
+                    stack_level=1,
+                    transaction_id=self.current_transaction_id,
+                )
 
-            # Log the full response for debugging
-            _LOGGER.info(
-                "SetChargingProfile response: status=%s (type=%s)",
-                response.status,
-                type(response.status).__name__,
-            )
-
-            # Handle both string and enum status
-            status_str = str(response.status)
-            if status_str == "Accepted" or "accepted" in status_str.lower():
-                _LOGGER.info("✅ Current limit set to %sA - accepted by wallbox", limit)
-                # Track the new limit for future start/resume operations
+            if ok_default or ok_tx:
+                # Track the new limit for future start/resume/connect operations
                 self.data["current_limit"] = limit
                 self.async_set_updated_data(self.data)
                 return True
+
             _LOGGER.warning(
-                "⚠️ Current limit rejected by wallbox: %s. "
-                "This can happen if the car is not drawing power or the session ended.",
-                response.status,
+                "⚠️ Current limit %sA not applied (no profile accepted)", limit
             )
             return False
 
@@ -1478,6 +1565,42 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("❌ Failed to set current limit: %s", err, exc_info=True)
             return False
+
+    async def async_apply_limit_on_transaction_start(self) -> None:
+        """Push the configured limit right when a session starts (issue #15).
+
+        Without this the wallbox charges at full power until the next poll picks
+        up the transaction, which can trip the supplier's main breaker.
+        """
+        limit = self.data.get("current_limit")
+        if not limit:
+            return
+        _LOGGER.info("🚀 Transaction started - applying %sA immediately", limit)
+        await self.async_set_current_limit(limit)
+
+    async def _apply_default_limit_on_connect(self) -> None:
+        """Install the TxDefaultProfile after the wallbox connects (issue #15).
+
+        Ensures the very first session after a (re)connect already starts at the
+        configured limit instead of full power.
+        """
+        # Let the connection settle and the pause/resume config run first.
+        await asyncio.sleep(5)
+        if not self.charge_point:
+            return
+        limit = self.data.get("current_limit")
+        if not limit:
+            return
+        try:
+            await self._send_charging_profile(
+                limit,
+                purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                profile_id=998,
+                stack_level=0,
+            )
+        except Exception as err:
+            # Best-effort - never let this block the connection handler.
+            _LOGGER.warning("Could not install TxDefaultProfile on connect: %s", err)
 
     async def async_trigger_meter_values(self) -> bool:
         """Trigger wallbox to send meter values immediately.
