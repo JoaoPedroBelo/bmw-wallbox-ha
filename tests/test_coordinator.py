@@ -3,11 +3,13 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from ocpp.v201.enums import ChargingProfilePurposeEnumType
 import pytest
 
 from custom_components.bmw_wallbox.coordinator import (
     BMWWallboxCoordinator,
     WallboxChargePoint,
+    _compute_live_current,
 )
 
 
@@ -327,6 +329,32 @@ async def test_notify_event_handler(charge_point):
 
     # Should not raise exception
     assert response is not None
+
+
+async def test_notify_ev_charging_needs_handler(charge_point):
+    """Test NotifyEVChargingNeeds handler (issue #14).
+
+    BMW Wallbox Plus Gen 4 (Delta) sends NotifyEVChargingNeeds during the EV
+    charging negotiation. The handler must accept it; otherwise the ocpp library
+    raises NotImplementedError, breaking the message pump and stopping
+    SetChargingProfile from being applied.
+    """
+    response = await charge_point.on_notify_ev_charging_needs(
+        evse_id=1,
+        charging_needs={
+            "requested_energy_transfer": "AC_single_phase",
+            "ac_charging_parameters": {
+                "energy_amount": 10000,
+                "ev_min_current": 6,
+                "ev_max_current": 16,
+                "ev_max_voltage": 230,
+            },
+        },
+    )
+
+    # Should not raise exception and must return an Accepted status
+    assert response is not None
+    assert response.status == "Accepted"
 
 
 # ==============================================================================
@@ -736,3 +764,175 @@ async def test_trigger_meter_values_error(coordinator):
     result = await coordinator.async_trigger_meter_values()
 
     assert result is False
+
+
+# ==============================================================================
+# LIVE CURRENT CALCULATION TESTS (issue #15 - stale Current sensor)
+# ==============================================================================
+
+
+def test_compute_live_current_direct_total_last_resort():
+    """A directly reported total is used only when nothing else is available."""
+    assert _compute_live_current({}, 14.0, 0, 0, 1) == 14.0
+
+
+def test_compute_live_current_phase_beats_stale_total():
+    """Per-phase reading wins over a stale non-phased total (issue #15).
+
+    The Delta firmware keeps reporting a frozen non-phased Current.Import (e.g.
+    30.4 from before the limit was applied) while the per-phase reading tracks
+    the real current. The per-phase value must win.
+    """
+    data = {"current_l1": 9.38, "current_l2": 0, "current_l3": 0}
+    assert _compute_live_current(data, 30.37, 2087, 230, 1) == 9.4
+
+
+def test_compute_live_current_power_beats_stale_total():
+    """Power-derived value wins over a stale non-phased total too."""
+    assert _compute_live_current({}, 30.37, 2300, 230, 1) == 10.0
+
+
+def test_compute_live_current_single_phase_average():
+    """Single-phase current comes from the active phase, not stale total."""
+    data = {"current_l1": 9.0, "current_l2": 0, "current_l3": 0}
+    assert _compute_live_current(data, None, 2080, 230, 1) == 9.0
+
+
+def test_compute_live_current_three_phase_average():
+    """Three-phase balanced current is the per-phase value."""
+    data = {"current_l1": 16.0, "current_l2": 16.0, "current_l3": 16.0}
+    assert _compute_live_current(data, None, 11000, 230, 3) == 16.0
+
+
+def test_compute_live_current_derived_from_power_single_phase():
+    """Falls back to P/V when no phase currents are reported."""
+    assert _compute_live_current({}, None, 2300, 230, 1) == 10.0
+
+
+def test_compute_live_current_derived_from_power_three_phase():
+    """Three-phase derivation uses sqrt(3)."""
+    assert _compute_live_current({}, None, 11000, 230, 3) == 27.6
+
+
+def test_compute_live_current_none_when_no_data():
+    """Returns None when there is nothing to compute from."""
+    assert _compute_live_current({}, None, 0, 0, 1) is None
+
+
+async def test_meter_values_current_not_stale(charge_point):
+    """Current sensor must refresh from phases, not stick at an old total.
+
+    Regression for issue #15: once a stale total was stored it was never
+    recomputed, so the Current sensor stayed frozen while power dropped.
+    """
+    data = charge_point.coordinator.data
+    # Simulate a previously-stored stale total current.
+    data["current"] = 30.4
+
+    # The wallbox keeps sending a frozen non-phased total (30.4) alongside a
+    # fresh per-phase reading (9.0) - exactly what was seen live.
+    meter_value = [
+        {
+            "timestamp": datetime.utcnow().isoformat(),
+            "sampled_value": [
+                {"measurand": "Power.Active.Import", "value": "2080"},
+                {"measurand": "Current.Import", "value": "30.4"},
+                {"measurand": "Current.Import", "value": "9.0", "phase": "L1"},
+            ],
+        }
+    ]
+
+    await charge_point.on_meter_values(evse_id=1, meter_value=meter_value)
+
+    # Should reflect the fresh per-phase reading, not the stale non-phased 30.4
+    assert data["current_l1"] == 9.0
+    assert data["current"] == 9.0
+
+
+async def test_transaction_event_ended_resets_live_readings(charge_point):
+    """When the session ends, live readings must reset (issue #15)."""
+    data = charge_point.coordinator.data
+    data["current"] = 16.0
+    data["power"] = 3680.0
+    data["current_l1"] = 16.0
+
+    await charge_point.on_transaction_event(
+        event_type="Ended",
+        timestamp=datetime.utcnow().isoformat(),
+        trigger_reason="EVCommunicationLost",
+        seq_no=99,
+        transaction_info={"transaction_id": "tx-1", "charging_state": "Available"},
+    )
+
+    assert data["current"] == 0
+    assert data["power"] == 0
+    assert data["current_l1"] == 0
+
+
+# ==============================================================================
+# CURRENT LIMIT TIMING TESTS (issue #15 - startup overshoot)
+# ==============================================================================
+
+
+def _profile_purposes(mock_call):
+    """Extract the charging_profile_purpose of every SetChargingProfile sent."""
+    purposes = []
+    for call_args in mock_call.call_args_list:
+        msg = call_args.args[0]
+        purposes.append(msg.charging_profile.charging_profile_purpose)
+    return purposes
+
+
+async def test_set_current_limit_sends_tx_default_profile(coordinator):
+    """During a session both TxDefaultProfile and TxProfile are sent (issue #15)."""
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    result = await coordinator.async_set_current_limit(13.0)
+
+    assert result is True
+    purposes = _profile_purposes(mock_cp.call)
+    assert ChargingProfilePurposeEnumType.tx_default_profile in purposes
+    assert ChargingProfilePurposeEnumType.tx_profile in purposes
+    assert coordinator.data["current_limit"] == 13.0
+
+
+async def test_set_current_limit_without_transaction_uses_default_only(coordinator):
+    """Without an active session the TxDefaultProfile alone still sets the limit."""
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = None
+
+    result = await coordinator.async_set_current_limit(10.0)
+
+    assert result is True
+    purposes = _profile_purposes(mock_cp.call)
+    assert purposes == [ChargingProfilePurposeEnumType.tx_default_profile]
+    assert coordinator.data["current_limit"] == 10.0
+
+
+async def test_set_current_limit_no_wallbox(coordinator):
+    """Setting the limit fails cleanly when the wallbox is not connected."""
+    coordinator.charge_point = None
+
+    result = await coordinator.async_set_current_limit(16.0)
+
+    assert result is False
+
+
+async def test_apply_limit_on_transaction_start(coordinator):
+    """A starting transaction triggers an immediate limit push (issue #15)."""
+    coordinator.charge_point = MagicMock()
+    coordinator.data["current_limit"] = 13.0
+    coordinator.async_set_current_limit = AsyncMock(return_value=True)
+
+    await coordinator.async_apply_limit_on_transaction_start()
+
+    coordinator.async_set_current_limit.assert_called_once_with(13.0)
