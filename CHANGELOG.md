@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-06-20
+
+### Added
+
+- **`NotifyEVChargingNeeds` handler (OCPP 2.0.1 / ISO 15118)** - Wallboxes that perform high-level EV charging-needs negotiation (e.g. BMW Wallbox Plus Gen 4 / Delta) send `NotifyEVChargingNeeds`. Without a handler the OCPP library replied with a `CallError` and flooded the log. The message is now acknowledged cleanly, keeping the OCPP session healthy ([#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14))
+- **`TxDefaultProfile` for the charging current limit** - A default charging profile is now installed when the wallbox connects and on every limit change, and the limit is pushed immediately when a transaction starts. This stops the wallbox from charging at full power for up to ~2 minutes at the start of a session before the configured limit is applied ([#15](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/15))
+
+### Fixed
+
+- **`Current` sensor stuck at the last value** - The live current was only recomputed when missing, so it stayed frozen while power changed and after a session ended. It is now recomputed on every meter update (priority: per-phase → power/voltage → reported total) and reset when the session ends. The Delta firmware freezes its non-phased total register while the per-phase readings track reality, so per-phase now takes precedence ([#15](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/15))
+
+### Changed
+
+- The charging current limit can now be set without an active charging session (a `TxDefaultProfile` is applied so it takes effect on the next session)
+
 ## [1.6.3] - 2026-04-26
 
 ### Changed
