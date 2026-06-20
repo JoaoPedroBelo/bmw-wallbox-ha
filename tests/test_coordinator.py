@@ -646,13 +646,20 @@ async def test_async_set_current_limit(coordinator):
 
 
 async def test_async_set_current_limit_no_transaction(coordinator):
-    """Test set current limit fails without transaction."""
-    coordinator.charge_point = MagicMock()
+    """Without a transaction the limit is still set via TxDefaultProfile (#15)."""
+    mock_charge_point = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_charge_point.call = AsyncMock(return_value=mock_response)
+
+    coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = None
 
     result = await coordinator.async_set_current_limit(16.0)
 
-    assert result is False
+    assert result is True
+    purposes = _profile_purposes(mock_charge_point.call)
+    assert purposes == [ChargingProfilePurposeEnumType.tx_default_profile]
 
 
 async def test_async_trigger_meter_values(coordinator):
