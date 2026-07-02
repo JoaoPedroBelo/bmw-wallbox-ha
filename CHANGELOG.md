@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-02
+
+### Fixed
+
+- **Wallbox stuck at its previous current limit after an automated `SetChargingProfile`** - Every OCPP command wrapped `call()` in a 15s timeout shorter than the `ocpp` library's own 30s response timeout. When the Delta firmware was slow to answer (e.g. mid ISO 15118 negotiation), the outer timeout cancelled the in-flight request; the wallbox's late reply was then orphaned in the library's response queue and every following response was read one slot too early (`Ignoring response with unknown unique id`), so `SetChargingProfile` was silently ignored and the current stuck at its last value. A house-load automation firing repeatedly (concurrently with the background meter poll) made the desync permanent, while isolated manual changes did not. Commands are now serialised through a single helper that relies on the library's own response timeout instead of a shorter external one ([#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14))
+- **`NotifyChargingLimit` / `ClearedChargingLimit` log spam** - The BMW/Delta Gen 4 firmware sends these messages (even with no car charging, e.g. `chargingLimitSource: 'SO'`). Without handlers the OCPP library logged `KeyError` / `NotImplementedError` repeatedly. They are now acknowledged cleanly, same approach as `NotifyEVChargingNeeds` ([#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14))
+
+### Changed
+
+- Startup messages about the firmware rejecting `StopTxOnEVSideDisconnect` and `TxDefaultProfile` are now logged at INFO with an explanation instead of as warnings - they are expected on BMW/Delta Gen 4 firmware and pause/resume and per-session limits still work correctly ([#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14))
+
 ## [1.7.0] - 2026-06-20
 
 ### Added

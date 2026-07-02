@@ -1,12 +1,19 @@
 """Test BMW Wallbox coordinator."""
 
+import asyncio
+import contextlib
 from datetime import datetime
+import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ocpp.v201.enums import ChargingProfilePurposeEnumType
+from ocpp.v201 import call, call_result
+from ocpp.v201.enums import ChargingProfilePurposeEnumType, MessageTriggerEnumType
 import pytest
 
 from custom_components.bmw_wallbox.coordinator import (
+    OCPP_CALL_BACKSTOP_TIMEOUT,
+    OCPP_RESPONSE_TIMEOUT,
     BMWWallboxCoordinator,
     WallboxChargePoint,
     _compute_live_current,
@@ -355,6 +362,33 @@ async def test_notify_ev_charging_needs_handler(charge_point):
     # Should not raise exception and must return an Accepted status
     assert response is not None
     assert response.status == "Accepted"
+
+
+async def test_notify_charging_limit_handler(charge_point):
+    """Test NotifyChargingLimit handler (issue #14).
+
+    The BMW/Delta Gen 4 firmware sends NotifyChargingLimit (e.g. with
+    chargingLimitSource 'SO') even when no car is charging. Without a handler
+    the ocpp library raises NotImplementedError and floods the HA log with
+    KeyError: 'NotifyChargingLimit'.
+    """
+    response = await charge_point.on_notify_charging_limit(
+        charging_limit={"charging_limit_source": "SO"},
+    )
+
+    assert response is not None
+    assert isinstance(response, call_result.NotifyChargingLimit)
+
+
+async def test_cleared_charging_limit_handler(charge_point):
+    """Test ClearedChargingLimit handler (issue #14 - counterpart message)."""
+    response = await charge_point.on_cleared_charging_limit(
+        charging_limit_source="SO",
+        evse_id=1,
+    )
+
+    assert response is not None
+    assert isinstance(response, call_result.ClearedChargingLimit)
 
 
 # ==============================================================================
@@ -943,3 +977,153 @@ async def test_apply_limit_on_transaction_start(coordinator):
     await coordinator.async_apply_limit_on_transaction_start()
 
     coordinator.async_set_current_limit.assert_called_once_with(13.0)
+
+
+# ==============================================================================
+# OCPP CALL SERIALISATION / RESPONSE-QUEUE DESYNC TESTS (issue #14)
+# ==============================================================================
+
+
+class _FakeWallboxConnection:
+    """Minimal websockets-like connection that drives the real ocpp pump.
+
+    It replies to every Call (message type 2) with a CallResult
+    {"status": "Accepted"} after ``response_delay`` seconds, so tests can
+    exercise the library's real request/response matching (self._response_queue
+    + self._get_specific_response) that issue #14 desynced.
+    """
+
+    def __init__(self, response_delay: float = 0.0):
+        self.response_delay = response_delay
+        self.sent: list[str] = []
+        self._incoming: asyncio.Queue[str] = asyncio.Queue()
+
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+        data = json.loads(message)
+        if data[0] == 2:  # Call -> schedule a matching CallResult
+            asyncio.create_task(self._reply(data[1]))
+
+    async def _reply(self, unique_id: str) -> None:
+        if self.response_delay:
+            await asyncio.sleep(self.response_delay)
+        await self._incoming.put(json.dumps([3, unique_id, {"status": "Accepted"}]))
+
+    async def recv(self) -> str:
+        return await self._incoming.get()
+
+
+def _meter_trigger():
+    return call.TriggerMessage(
+        requested_message=MessageTriggerEnumType.meter_values,
+        evse={"id": 1, "connector_id": 1},
+    )
+
+
+async def test_ocpp_call_raises_without_wallbox(coordinator):
+    """_ocpp_call fails fast (not silently) when no wallbox is connected."""
+    coordinator.charge_point = None
+
+    with pytest.raises(RuntimeError):
+        await coordinator._ocpp_call(_meter_trigger())
+
+
+async def test_ocpp_call_serialises_concurrent_calls(coordinator):
+    """Only one OCPP request may be in flight at a time (issue #14).
+
+    Interleaved requests were part of what desynced the response queue; the
+    coordinator lock must serialise every call regardless of how many callers
+    fire concurrently.
+    """
+    in_flight = 0
+    max_in_flight = 0
+
+    async def fake_call(_payload):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        resp = MagicMock()
+        resp.status = "Accepted"
+        return resp
+
+    cp = MagicMock()
+    cp.call = fake_call
+    coordinator.charge_point = cp
+
+    await asyncio.gather(*(coordinator._ocpp_call(MagicMock()) for _ in range(8)))
+
+    assert max_in_flight == 1
+
+
+async def test_ocpp_call_uses_authoritative_timeout():
+    """The wallbox response_timeout is the single authority (issue #14).
+
+    A shorter external timeout would cancel an in-flight call() and orphan the
+    reply. The backstop must therefore be longer than the library's own
+    response_timeout, and the charge point must be built with it.
+    """
+    assert OCPP_CALL_BACKSTOP_TIMEOUT > OCPP_RESPONSE_TIMEOUT
+
+    cp = WallboxChargePoint("CP", MagicMock(), MagicMock())
+    assert cp._response_timeout == OCPP_RESPONSE_TIMEOUT
+
+
+async def test_ocpp_call_stays_in_sync_through_real_pump(coordinator, caplog):
+    """Rapid calls through _ocpp_call each get their own reply (issue #14).
+
+    Runs against the real ocpp message pump: every _ocpp_call must resolve to a
+    matching CallResult with no "Ignoring response with unknown unique id"
+    desync, even when the wallbox is slow enough that a short external timeout
+    would have cancelled the request mid-flight.
+    """
+    conn = _FakeWallboxConnection(response_delay=0.05)
+    cp = WallboxChargePoint("CP", conn, coordinator)
+    coordinator.charge_point = cp
+    pump = asyncio.create_task(cp.start())
+
+    try:
+        with caplog.at_level(logging.ERROR, logger="ocpp"):
+            results = await asyncio.gather(
+                *(coordinator._ocpp_call(_meter_trigger()) for _ in range(10))
+            )
+    finally:
+        pump.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump
+
+    assert len(results) == 10
+    assert all(r.status == "Accepted" for r in results)
+    assert "unknown unique id" not in caplog.text.lower()
+
+
+async def test_short_external_timeout_desyncs_queue_regression(coordinator, caplog):
+    """Characterises the issue #14 root cause the fix removes.
+
+    Wrapping call() in an external timeout shorter than the wallbox's reply
+    cancels the in-flight request; the late reply is then orphaned in the ocpp
+    response queue and the *next* call reads it first, logging "Ignoring
+    response with unknown unique id". This is exactly the log line the reporter
+    saw, and precisely what _ocpp_call avoids by never using a short external
+    timeout.
+    """
+    conn = _FakeWallboxConnection(response_delay=0.2)
+    cp = WallboxChargePoint("CP", conn, coordinator)
+    coordinator.charge_point = cp
+    pump = asyncio.create_task(cp.start())
+
+    try:
+        with caplog.at_level(logging.ERROR, logger="ocpp"):
+            # Old pattern: external timeout (0.05s) shorter than the reply (0.2s)
+            # cancels the request mid-flight.
+            with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+                await asyncio.wait_for(cp.call(_meter_trigger()), 0.05)
+            # The orphaned reply now poisons the following call.
+            await cp.call(_meter_trigger())
+
+        assert "unknown unique id" in caplog.text.lower()
+    finally:
+        pump.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump

@@ -128,28 +128,41 @@ class BMWWallboxPowerSensor(BMWWallboxSensorBase):
 
 ---
 
-### Pattern: Sending OCPP Commands with Timeout
+### Pattern: Sending OCPP Commands
 
-**Always wrap `call()` in `asyncio.wait_for()` with 15 second timeout.**
+**Always send commands through `self._ocpp_call(...)`. Never call
+`self.charge_point.call()` directly, and never wrap it in your own
+`asyncio.wait_for()`.**
 
 ```python
-# ✅ CORRECT: With timeout
+# ✅ CORRECT: go through the serialised helper
 try:
-    response = await asyncio.wait_for(
-        self.charge_point.call(
-            call.SetChargingProfile(evse_id=1, charging_profile=profile)
-        ),
-        timeout=15.0
+    response = await self._ocpp_call(
+        call.SetChargingProfile(evse_id=1, charging_profile=profile)
     )
-except asyncio.TimeoutError:
+except TimeoutError:
     _LOGGER.error("Command timed out!")
     return False
 
-# ❌ WRONG: No timeout (can hang forever)
-response = await self.charge_point.call(
-    call.SetChargingProfile(evse_id=1, charging_profile=profile)
+# ❌ WRONG: a short external timeout cancels the in-flight request, orphaning
+# the wallbox's reply in the ocpp response queue. Every following response is
+# then read one slot too early ("Ignoring response with unknown unique id") and
+# the wallbox appears to ignore SetChargingProfile, staying stuck at its last
+# limit. This is issue #14 - do not do it.
+response = await asyncio.wait_for(
+    self.charge_point.call(
+        call.SetChargingProfile(evse_id=1, charging_profile=profile)
+    ),
+    timeout=15.0,
 )
 ```
+
+`_ocpp_call` serialises every request behind a single lock and relies on the
+ocpp library's own `response_timeout` (`OCPP_RESPONSE_TIMEOUT`) as the single
+authority on how long to wait, with a slightly longer backstop
+(`OCPP_CALL_BACKSTOP_TIMEOUT`) only for a genuinely wedged socket. It raises
+`TimeoutError` if the wallbox never answers, so command paths still handle
+`TimeoutError` exactly as before.
 
 ---
 

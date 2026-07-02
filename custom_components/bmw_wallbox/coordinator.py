@@ -50,6 +50,24 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# --- OCPP call serialisation / timeout (issue #14) ---
+# The ocpp library serialises outgoing calls and matches every response to its
+# request through an internal queue (see charge_point._get_specific_response).
+# Cancelling a call() while it is still waiting for a response - which a short
+# external asyncio.wait_for does - leaves the wallbox's late reply orphaned in
+# that queue with no waiter. The next call then reads that stale reply first
+# ("Ignoring response with unknown unique id"), so every response is off by one
+# and SetChargingProfile appears to be ignored while the current stays stuck at
+# its previous value. Under a house-load automation firing SetChargingProfile
+# repeatedly (concurrently with the background meter poll) the orphans pile up
+# and the desync becomes permanent.
+#
+# Fix: let the library's own response_timeout be the single authority on how
+# long to wait (never a shorter external one that cancels mid-flight) and keep
+# only a slightly longer backstop for a genuinely wedged socket.
+OCPP_RESPONSE_TIMEOUT = 20.0
+OCPP_CALL_BACKSTOP_TIMEOUT = 30.0
+
 
 def _compute_live_current(
     data: dict[str, Any],
@@ -98,10 +116,19 @@ class WallboxChargePoint(cp):
     """ChargePoint handler for the BMW wallbox."""
 
     def __init__(
-        self, charge_point_id: str, websocket, coordinator: BMWWallboxCoordinator
+        self,
+        charge_point_id: str,
+        websocket,
+        coordinator: BMWWallboxCoordinator,
+        response_timeout: float = OCPP_RESPONSE_TIMEOUT,
     ):
-        """Initialize the ChargePoint."""
-        super().__init__(charge_point_id, websocket)
+        """Initialize the ChargePoint.
+
+        ``response_timeout`` is the single authority on how long we wait for a
+        wallbox reply; command paths must not wrap ``call()`` in a shorter
+        timeout (issue #14 - see OCPP_RESPONSE_TIMEOUT).
+        """
+        super().__init__(charge_point_id, websocket, response_timeout=response_timeout)
         self.coordinator = coordinator
         self.current_transaction_id: str | None = None
         _LOGGER.info("Initialized ChargePoint: %s", charge_point_id)
@@ -497,6 +524,29 @@ class WallboxChargePoint(cp):
             status=NotifyEVChargingNeedsStatusEnumType.accepted
         )
 
+    @on("NotifyChargingLimit")
+    async def on_notify_charging_limit(self, **kwargs):
+        """Handle NotifyChargingLimit (OCPP 2.0.1).
+
+        The BMW/Delta Gen 4 firmware sends this (even with no car charging, e.g.
+        chargingLimitSource 'SO') to report an externally imposed charging limit.
+        Without a handler the ocpp library replies with a CallError
+        (NotImplementedError) and floods the HA log. We just acknowledge it. See
+        issue #14, same approach as NotifyEVChargingNeeds / NotifyEvent.
+        """
+        _LOGGER.debug("NotifyChargingLimit received: %s", kwargs)
+        return call_result.NotifyChargingLimit()
+
+    @on("ClearedChargingLimit")
+    async def on_cleared_charging_limit(self, **kwargs):
+        """Handle ClearedChargingLimit (OCPP 2.0.1).
+
+        The counterpart of NotifyChargingLimit - sent when an external charging
+        limit is lifted. Acknowledged for the same reason (issue #14).
+        """
+        _LOGGER.debug("ClearedChargingLimit received: %s", kwargs)
+        return call_result.ClearedChargingLimit()
+
 
 class BMWWallboxCoordinator(DataUpdateCoordinator):
     """Class to manage fetching BMW Wallbox data."""
@@ -520,6 +570,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         self.charge_point: WallboxChargePoint | None = None
         self.current_transaction_id: str | None = None
         self.device_info: dict[str, Any] = {}
+        # Serialises every outbound OCPP call (see _ocpp_call, issue #14).
+        self._call_lock = asyncio.Lock()
 
         # Initialize data
         self.data: dict[str, Any] = {
@@ -569,6 +621,31 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             "current_limit": config.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
         }
 
+    async def _ocpp_call(self, payload: Any) -> Any:
+        """Send one OCPP request, serialised and with a single authoritative timeout.
+
+        Every wallbox command and background poll funnels through here so that:
+
+        * only one request is ever in flight - this keeps multi-step sequences
+          (e.g. ClearChargingProfile then SetChargingProfile) from interleaving
+          with the periodic meter poll, and
+        * ``call()`` is never wrapped in a timeout shorter than the library's own
+          ``response_timeout``. A shorter external timeout used to cancel the
+          request mid-flight; the wallbox's late reply was then orphaned in the
+          ocpp response queue, desyncing every following response so
+          SetChargingProfile appeared ignored and the current stuck at its
+          previous value (issue #14).
+
+        Raises ``TimeoutError`` if the wallbox never answers (backstop), or
+        ``RuntimeError`` if no wallbox is connected.
+        """
+        if not self.charge_point:
+            raise RuntimeError("Wallbox not connected")
+        async with self._call_lock:
+            return await asyncio.wait_for(
+                self.charge_point.call(payload), OCPP_CALL_BACKSTOP_TIMEOUT
+            )
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the wallbox."""
         # When there's an active transaction, proactively request fresh meter values.
@@ -598,9 +675,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 variable=VariableType(name="StopTxOnEVSideDisconnect"),
             )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(call.SetVariables(set_variable_data=[set_var])),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                call.SetVariables(set_variable_data=[set_var])
             )
 
             if response.set_variable_result:
@@ -610,8 +686,13 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 if status == "Accepted":
                     _LOGGER.info("✅ Wallbox configured for pause/resume!")
                 else:
-                    _LOGGER.warning(
-                        "⚠️ Could not configure StopTxOnEVSideDisconnect: %s", status
+                    # Delta Gen 4 firmware rejects this variable, yet pause still
+                    # works via a 0A SetChargingProfile - so this is informational,
+                    # not a real failure (issue #14).
+                    _LOGGER.info(
+                        "StopTxOnEVSideDisconnect not settable (%s); pause/resume "
+                        "still works via a 0A charging profile",
+                        status,
                     )
         except Exception as e:
             _LOGGER.warning("Could not configure StopTxOnEVSideDisconnect: %s", e)
@@ -703,14 +784,11 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             from ocpp.v201 import call as ocpp_call
             from ocpp.v201.enums import MessageTriggerEnumType
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    ocpp_call.TriggerMessage(
-                        requested_message=MessageTriggerEnumType.transaction_event,
-                        evse={"id": 1, "connector_id": 1},
-                    )
-                ),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                ocpp_call.TriggerMessage(
+                    requested_message=MessageTriggerEnumType.transaction_event,
+                    evse={"id": 1, "connector_id": 1},
+                )
             )
 
             _LOGGER.info("Transaction recovery trigger response: %s", response.status)
@@ -821,15 +899,12 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                     type=IdTokenEnumType.no_authorization,
                 )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    call.RequestStartTransaction(
-                        id_token=id_token,
-                        remote_start_id=int(datetime.utcnow().timestamp()),
-                        evse_id=1,
-                    )
-                ),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                call.RequestStartTransaction(
+                    id_token=id_token,
+                    remote_start_id=int(datetime.utcnow().timestamp()),
+                    evse_id=1,
+                )
             )
 
             _LOGGER.info("RequestStartTransaction response: %s", response.status)
@@ -881,13 +956,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                             charging_schedule=[schedule],
                         )
 
-                        profile_response = await asyncio.wait_for(
-                            self.charge_point.call(
-                                call.SetChargingProfile(
-                                    evse_id=1, charging_profile=profile
-                                )
-                            ),
-                            timeout=15.0,
+                        profile_response = await self._ocpp_call(
+                            call.SetChargingProfile(evse_id=1, charging_profile=profile)
                         )
                         _LOGGER.info(
                             "SetChargingProfile response: %s", profile_response.status
@@ -987,10 +1057,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             await status_callback("Sending reset command to wallbox...")
 
         try:
-            response = await asyncio.wait_for(
-                self.charge_point.call(call.Reset(type=ResetEnumType.immediate)),
-                timeout=15.0,
-            )
+            response = await self._ocpp_call(call.Reset(type=ResetEnumType.immediate))
 
             _LOGGER.info("Reset response: %s", response.status)
 
@@ -1100,13 +1167,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         )
 
         try:
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    call.GetTransactionStatus(
-                        transaction_id=self.current_transaction_id
-                    )
-                ),
-                timeout=10.0,
+            response = await self._ocpp_call(
+                call.GetTransactionStatus(transaction_id=self.current_transaction_id)
             )
 
             _LOGGER.info(
@@ -1190,9 +1252,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             # First clear ALL existing profiles to ensure clean state (like resume does)
             _LOGGER.info("Clearing ALL charging profiles first...")
             try:
-                clear_response = await asyncio.wait_for(
-                    self.charge_point.call(call.ClearChargingProfile()), timeout=10.0
-                )
+                clear_response = await self._ocpp_call(call.ClearChargingProfile())
                 _LOGGER.info("ClearChargingProfile response: %s", clear_response.status)
             except Exception as e:
                 _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
@@ -1218,11 +1278,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 charging_schedule=[schedule],
             )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    call.SetChargingProfile(evse_id=1, charging_profile=profile)
-                ),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                call.SetChargingProfile(evse_id=1, charging_profile=profile)
             )
 
             _LOGGER.info("Pause response: %s", response.status)
@@ -1347,9 +1404,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Clearing ALL charging profiles first...")
             try:
                 # Clear without specifying ID = clear all profiles
-                clear_response = await asyncio.wait_for(
-                    self.charge_point.call(call.ClearChargingProfile()), timeout=10.0
-                )
+                clear_response = await self._ocpp_call(call.ClearChargingProfile())
                 _LOGGER.info(
                     "ClearChargingProfile (all) response: %s", clear_response.status
                 )
@@ -1379,11 +1434,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 charging_schedule=[schedule],
             )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    call.SetChargingProfile(evse_id=1, charging_profile=profile)
-                ),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                call.SetChargingProfile(evse_id=1, charging_profile=profile)
             )
 
             _LOGGER.info("Resume response: %s", response.status)
@@ -1486,17 +1538,26 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             limit,
         )
 
-        response = await asyncio.wait_for(
-            self.charge_point.call(
-                call.SetChargingProfile(evse_id=1, charging_profile=profile)
-            ),
-            timeout=15.0,
+        response = await self._ocpp_call(
+            call.SetChargingProfile(evse_id=1, charging_profile=profile)
         )
 
         status_str = str(response.status)
         accepted = status_str == "Accepted" or "accepted" in status_str.lower()
         if accepted:
             _LOGGER.info("✅ %s set to %sA - accepted by wallbox", purpose, limit)
+        elif purpose == ChargingProfilePurposeEnumType.tx_default_profile:
+            # Some firmware (BMW/Delta Gen 4) doesn't accept a persistent
+            # TxDefaultProfile but honours the per-session TxProfile we send
+            # alongside it, so the limit still applies. Keep this informational
+            # rather than a scary warning (issue #14).
+            _LOGGER.info(
+                "%s (%sA) not accepted by wallbox: %s - the per-session profile "
+                "still applies the limit",
+                purpose,
+                limit,
+                response.status,
+            )
         else:
             _LOGGER.warning(
                 "⚠️ %s (%sA) rejected by wallbox: %s", purpose, limit, response.status
@@ -1618,14 +1679,11 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             from ocpp.v201 import call as ocpp_call
             from ocpp.v201.enums import MessageTriggerEnumType
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(
-                    ocpp_call.TriggerMessage(
-                        requested_message=MessageTriggerEnumType.meter_values,
-                        evse={"id": 1, "connector_id": 1},
-                    )
-                ),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                ocpp_call.TriggerMessage(
+                    requested_message=MessageTriggerEnumType.meter_values,
+                    evse={"id": 1, "connector_id": 1},
+                )
             )
 
             _LOGGER.info("TriggerMessage response: %s", response.status)
@@ -1660,9 +1718,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 variable=VariableType(name="StatusLedBrightness"),
             )
 
-            response = await asyncio.wait_for(
-                self.charge_point.call(call.SetVariables(set_variable_data=[set_var])),
-                timeout=15.0,
+            response = await self._ocpp_call(
+                call.SetVariables(set_variable_data=[set_var])
             )
 
             # Check result
