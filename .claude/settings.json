@@ -1,0 +1,140 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(*)",
+      "Write(*)",
+      "Read(*)",
+      "NotebookEdit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(domain:*)",
+      "WebSearch",
+      "Agent(*)",
+      "Bash(.venv/bin/*)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(dmypy *)",
+      "Bash(pre-commit *)",
+      "Bash(make *)",
+      "Bash(pip install -r *)",
+      "Bash(pip list*)",
+      "Bash(pip show *)",
+      "Bash(ls *)",
+      "Bash(pwd)",
+      "Bash(which *)",
+      "Bash(echo *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(diff *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(git stash*)",
+      "Bash(git fetch*)",
+      "Bash(git pull*)",
+      "Bash(git merge *)",
+      "Bash(git checkout -b *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gh *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(rmdir *)",
+      "Bash(pip install *)",
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git rebase *)",
+      "Bash(docker *)",
+      "Bash(kill *)",
+      "Bash(killall *)",
+      "Bash(chmod *)",
+      "Bash(chown *)"
+    ],
+    "deny": []
+  },
+  "respectGitignore": true,
+  "enableAllProjectMcpServers": true,
+  "worktree": {
+    "symlinkDirectories": [".venv"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect-files.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-no-verify.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format-on-edit.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lint-on-edit.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/print-debug-warn.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '⚠️ Post-compaction reminders: (1) HA is the OCPP server (CSMS) — the wallbox connects TO HA. (2) EVCC-style control: pause/resume via SetChargingProfile (limit 0A), NEVER RequestStopTransaction. (3) All state lives in coordinator.data; call async_set_updated_data() after changes. (4) Every OCPP call wrapped in asyncio.wait_for(timeout=15.0). (5) Tests mandatory (pytest) — run with .venv/bin/python. (6) Read custom_components/bmw_wallbox/docs/ before changing coordinator/entities. (7) Conventional commits, no AI attribution, no commits unless asked.'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"BMW Wallbox\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
