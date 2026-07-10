@@ -1559,8 +1559,24 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 response.status,
             )
         else:
+            # Surface the wallbox's own reason for the rejection - essential to
+            # debug firmware-specific refusals (issue #14).
+            reason = ""
+            status_info = getattr(response, "status_info", None)
+            if status_info:
+                if isinstance(status_info, dict):
+                    reason = (
+                        f" (reason={status_info.get('reason_code', '?')},"
+                        f" info={status_info.get('additional_info', '')})"
+                    )
+                else:
+                    reason = f" (status_info={status_info})"
             _LOGGER.warning(
-                "⚠️ %s (%sA) rejected by wallbox: %s", purpose, limit, response.status
+                "⚠️ %s (%sA) rejected by wallbox: %s%s",
+                purpose,
+                limit,
+                response.status,
+                reason,
             )
         return accepted
 
@@ -1589,25 +1605,44 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         )
 
         try:
-            # TxDefaultProfile persists across sessions and applies from the start
-            # of the next transaction - prevents the startup overshoot.
-            ok_default = await self._send_charging_profile(
-                limit,
-                purpose=ChargingProfilePurposeEnumType.tx_default_profile,
-                profile_id=998,
-                stack_level=0,
-            )
+            # The Delta firmware does NOT replace an existing profile with the
+            # same id/stack - it rejects the duplicate. After any start/resume
+            # (which installs TxProfile id=999) every mid-session limit change
+            # was therefore Rejected (issue #14 retest, seen live). Clear first,
+            # exactly like the proven pause/resume paths do, then reinstall.
+            if self.current_transaction_id:
+                try:
+                    clear_response = await self._ocpp_call(call.ClearChargingProfile())
+                    _LOGGER.debug(
+                        "ClearChargingProfile before limit change: %s",
+                        clear_response.status,
+                    )
+                except Exception as e:
+                    _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
 
             # TxProfile takes effect immediately on the running session.
+            # stack_level 0 matches the pause/resume paths; some Delta firmware
+            # rejects any higher level (ChargingProfileMaxStackLevel=0), and
+            # TxProfile already outranks TxDefaultProfile by purpose alone.
             ok_tx = False
             if self.current_transaction_id:
                 ok_tx = await self._send_charging_profile(
                     limit,
                     purpose=ChargingProfilePurposeEnumType.tx_profile,
                     profile_id=999,
-                    stack_level=1,
+                    stack_level=0,
                     transaction_id=self.current_transaction_id,
                 )
+
+            # TxDefaultProfile persists across sessions and applies from the
+            # start of the next transaction - prevents the startup overshoot.
+            # Sent after the TxProfile so the running session is limited first.
+            ok_default = await self._send_charging_profile(
+                limit,
+                purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                profile_id=998,
+                stack_level=0,
+            )
 
             if ok_default or ok_tx:
                 # Track the new limit for future start/resume/connect operations

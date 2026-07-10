@@ -915,13 +915,86 @@ async def test_transaction_event_ended_resets_live_readings(charge_point):
 # ==============================================================================
 
 
+def _set_profile_messages(mock_call):
+    """Return the SetChargingProfile payloads sent (skips e.g. Clear calls)."""
+    return [
+        c.args[0]
+        for c in mock_call.call_args_list
+        if hasattr(c.args[0], "charging_profile")
+    ]
+
+
 def _profile_purposes(mock_call):
     """Extract the charging_profile_purpose of every SetChargingProfile sent."""
-    purposes = []
-    for call_args in mock_call.call_args_list:
-        msg = call_args.args[0]
-        purposes.append(msg.charging_profile.charging_profile_purpose)
-    return purposes
+    return [
+        msg.charging_profile.charging_profile_purpose
+        for msg in _set_profile_messages(mock_call)
+    ]
+
+
+async def test_set_current_limit_clears_profiles_first_with_transaction(coordinator):
+    """Mid-session limit changes must clear existing profiles first (issue #14).
+
+    The Delta firmware does not replace a profile with the same id/stack - it
+    rejects the duplicate. After a start/resume installed TxProfile id=999,
+    every slider change was Rejected until profiles were cleared first (the
+    pause/resume paths already do this and are accepted).
+    """
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    assert await coordinator.async_set_current_limit(13.0) is True
+
+    sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
+    assert sent[0] == "ClearChargingProfile"
+    # TxProfile (immediate) before TxDefaultProfile (next-session persistence)
+    purposes = _profile_purposes(mock_cp.call)
+    assert purposes == [
+        ChargingProfilePurposeEnumType.tx_profile,
+        ChargingProfilePurposeEnumType.tx_default_profile,
+    ]
+
+
+async def test_set_current_limit_no_clear_without_transaction(coordinator):
+    """Without a session there is nothing to clear - TxDefault goes out alone."""
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = None
+
+    assert await coordinator.async_set_current_limit(10.0) is True
+
+    sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
+    assert sent == ["SetChargingProfile"]
+
+
+async def test_set_current_limit_profiles_use_stack_level_zero(coordinator):
+    """Every profile the slider sends must use stack_level=0 (issue #14 retest).
+
+    Delta firmware with ChargingProfileMaxStackLevel=0 rejects any profile at a
+    higher stack level, so a TxProfile at stack 1 was accepted-by-tests but
+    Rejected by the real wallbox and the limit never applied mid-session.
+    TxProfile already outranks TxDefaultProfile by purpose alone.
+    """
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    assert await coordinator.async_set_current_limit(13.0) is True
+
+    stack_levels = [
+        msg.charging_profile.stack_level for msg in _set_profile_messages(mock_cp.call)
+    ]
+    assert stack_levels == [0, 0]
 
 
 async def test_set_current_limit_sends_tx_default_profile(coordinator):

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-07-10
+
+### Fixed
+
+- **Mid-session current limit changes rejected by the wallbox ("stuck" charging current)** - Changing the charging current during an active session sent a `TxProfile` with `stack_level=1` and without clearing the previously installed profile. Delta Gen 4 firmware rejects profiles above stack level 0 and does not replace an existing profile with the same id - it rejects the duplicate, and once a transaction has seen such a rejection it keeps rejecting every subsequent profile (including the 0A pause, which then triggered the last-resort wallbox reboot) until a new transaction starts. The current-limit path now mirrors the proven pause/resume pattern: `ClearChargingProfile` first, then `TxProfile` (id 999, stack level 0) for immediate effect, then `TxDefaultProfile` (id 998) for the next session. Validated live: consecutive mid-charge changes (6→20→12→16A, plus a burst of 8 rapid automation-style changes) all applied within ~20s with zero rejections ([#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14))
+- **Rejection reasons now logged** - When the wallbox rejects a charging profile, the `statusInfo` reason code (when provided) is now included in the warning instead of a bare `Rejected`
+
 ## [1.7.1] - 2026-07-02
 
 ### Fixed
