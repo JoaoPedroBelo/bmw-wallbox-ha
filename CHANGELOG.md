@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.4] - 2026-07-11
+
+### Added
+
+- Local brand images (`brand/icon.png`, `brand/icon@2x.png`) served directly by
+  Home Assistant 2026.3+ from the integration folder. The images are the same BMW
+  roundel already published via the `home-assistant/brands` repo; the local copies
+  keep the icon working without the CDN. `logo.png` is intentionally omitted — the
+  HA `brands` component falls back to `icon.png` for logo requests.
+
 ## [1.7.3] - 2026-07-11
 
 ### Fixed
