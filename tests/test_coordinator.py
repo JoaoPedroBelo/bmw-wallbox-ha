@@ -1053,6 +1053,88 @@ async def test_apply_limit_on_transaction_start(coordinator):
 
 
 # ==============================================================================
+# RESUME LIMIT TESTS (issue #19 - resume clears profiles without re-applying)
+# ==============================================================================
+
+
+async def test_resume_reinstalls_tx_default_profile(coordinator):
+    """Resume must reinstall the TxDefaultProfile its clear-all wiped (issue #19).
+
+    The Delta firmware accepts a TxProfile sent while the transaction is
+    suspended but silently discards it, so without the TxDefaultProfile safety
+    net the session resumed at the hardware maximum (~11kW instead of e.g. 6A).
+    """
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+    coordinator.data["current_limit"] = 6.0
+
+    # Patch create_task to avoid lingering tasks from delayed_refresh
+    with patch("asyncio.create_task"):
+        result = await coordinator.async_resume_charging()
+
+    assert result["success"] is True
+    purposes = _profile_purposes(mock_cp.call)
+    assert purposes == [
+        ChargingProfilePurposeEnumType.tx_profile,
+        ChargingProfilePurposeEnumType.tx_default_profile,
+    ]
+    limits = [
+        msg.charging_profile.charging_schedule[0].charging_schedule_period[0].limit
+        for msg in _set_profile_messages(mock_cp.call)
+    ]
+    assert limits == [6.0, 6.0]
+
+
+async def test_apply_limit_on_charging_resumed(coordinator):
+    """Resuming from a suspended state re-pushes the tracked limit (issue #19)."""
+    coordinator.charge_point = MagicMock()
+    coordinator.data["current_limit"] = 8.0
+    coordinator.async_set_current_limit = AsyncMock(return_value=True)
+
+    await coordinator.async_apply_limit_on_charging_resumed()
+
+    coordinator.async_set_current_limit.assert_called_once_with(8.0)
+
+
+async def test_transaction_event_suspended_to_charging_reapplies_limit(charge_point):
+    """SuspendedEVSE → Charging must re-apply the limit (issue #19)."""
+    charge_point.coordinator.data["charging_state"] = "SuspendedEVSE"
+    charge_point.coordinator.async_apply_limit_on_charging_resumed = AsyncMock()
+
+    await charge_point.on_transaction_event(
+        event_type="Updated",
+        timestamp=datetime.utcnow().isoformat(),
+        trigger_reason="ChargingStateChanged",
+        seq_no=2,
+        transaction_info={"transaction_id": "tx-1", "charging_state": "Charging"},
+    )
+    await asyncio.sleep(0)  # let the created task run
+
+    charge_point.coordinator.async_apply_limit_on_charging_resumed.assert_called_once()
+
+
+async def test_transaction_event_charging_update_does_not_reapply_limit(charge_point):
+    """A routine Charging → Charging update must NOT re-push the limit."""
+    charge_point.coordinator.data["charging_state"] = "Charging"
+    charge_point.coordinator.async_apply_limit_on_charging_resumed = AsyncMock()
+
+    await charge_point.on_transaction_event(
+        event_type="Updated",
+        timestamp=datetime.utcnow().isoformat(),
+        trigger_reason="MeterValuePeriodic",
+        seq_no=3,
+        transaction_info={"transaction_id": "tx-1", "charging_state": "Charging"},
+    )
+    await asyncio.sleep(0)
+
+    charge_point.coordinator.async_apply_limit_on_charging_resumed.assert_not_called()
+
+
+# ==============================================================================
 # OCPP CALL SERIALISATION / RESPONSE-QUEUE DESYNC TESTS (issue #14)
 # ==============================================================================
 
