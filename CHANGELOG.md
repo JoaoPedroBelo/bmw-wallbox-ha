@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-07-11
+
+### Fixed
+
+- **Start Charging on a suspended session resumed at full unrestricted power** - The resume path cleared ALL charging profiles (including the persistent `TxDefaultProfile` safety net) and only re-sent a `TxProfile`, which the Delta Gen 4 firmware answers `Accepted` but silently discards while the transaction is suspended. The wallbox then charged at its hardware maximum (e.g. 16A × 3 phases ≈ 11kW) instead of the configured limit until the next `number.set_value` call. The resume now reinstalls the `TxDefaultProfile` after the clear, and the `SuspendedEV/SuspendedEVSE → Charging` transition re-pushes both profiles in a state where the firmware actually honours them ([#19](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/19))
+
+### Added
+
+- **Delta Gen 4 firmware simulation tests** - End-to-end tests running the integration's real OCPP server against a simulated wallbox that reproduces the firmware quirks from issues [#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14) and [#19](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/19) (accepted-but-discarded profiles while suspended, duplicate-id rejection latch, `ChargingProfileMaxStackLevel=0`, `NotifyEVChargingNeeds`), so these regressions are caught without hardware
+
 ## [1.7.2] - 2026-07-10
 
 ### Fixed

@@ -288,6 +288,20 @@ class WallboxChargePoint(cp):
                 self.coordinator.async_apply_limit_on_transaction_start()
             )
 
+        # When charging resumes from a suspended state, re-push the limit: the
+        # Delta firmware discards TxProfiles it accepted while suspended, so the
+        # session would otherwise draw the hardware maximum (issue #19).
+        previous_state = self.coordinator.data.get("charging_state")
+        new_state = transaction_info.get("charging_state")
+        if (
+            event_type == "Updated"
+            and new_state == "Charging"
+            and previous_state in ("SuspendedEV", "SuspendedEVSE")
+        ):
+            asyncio.create_task(
+                self.coordinator.async_apply_limit_on_charging_resumed()
+            )
+
         # Update coordinator data with basic transaction info
         self.coordinator.data.update(
             {
@@ -1448,6 +1462,23 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                     response.status_info.get("additional_info", "N/A"),
                 )
 
+            # The clear-all above also wiped the persistent TxDefaultProfile.
+            # Reinstall it: the Delta firmware accepts a TxProfile sent while
+            # the transaction is suspended but silently discards it, so without
+            # this safety net the session resumes at the hardware maximum until
+            # the next limit change (issue #19).
+            try:
+                await self._send_charging_profile(
+                    float(current_limit),
+                    purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                    profile_id=998,
+                    stack_level=0,
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "Could not reinstall TxDefaultProfile after resume: %s", err
+                )
+
             if response.status == "Accepted":
                 result["success"] = True
                 result["message"] = f"Charging resumed at {current_limit}A"
@@ -1672,6 +1703,21 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if not limit:
             return
         _LOGGER.info("🚀 Transaction started - applying %sA immediately", limit)
+        await self.async_set_current_limit(limit)
+
+    async def async_apply_limit_on_charging_resumed(self) -> None:
+        """Re-apply the configured limit when charging resumes (issue #19).
+
+        The Delta Gen 4 firmware returns Accepted for TxProfiles sent while the
+        transaction is SuspendedEV/SuspendedEVSE but silently discards them, so
+        once current actually starts flowing the session runs unrestricted.
+        Re-sending the profiles in the Charging state is the proven-working
+        path (issue #14 retest).
+        """
+        limit = self.data.get("current_limit")
+        if not limit:
+            return
+        _LOGGER.info("🔁 Charging resumed - re-applying %sA limit", limit)
         await self.async_set_current_limit(limit)
 
     async def _apply_default_limit_on_connect(self) -> None:
