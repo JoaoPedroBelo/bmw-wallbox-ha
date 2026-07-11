@@ -183,6 +183,19 @@ async def _wait_for(condition, timeout: float = 2.0) -> None:
         await asyncio.sleep(0.01)
 
 
+async def _start_session(sim, coordinator) -> None:
+    """Start a charging session and wait until the integration settles.
+
+    The Started event triggers the integration's own auto-apply of the
+    tracked limit (issue #15, 32A default). Wait for its final profile to
+    land before driving the test, or its background OCPP calls interleave
+    with the test's own commands (flaked on CI, passed locally).
+    """
+    await sim.send_transaction_event("Started", "Charging", seq_no=1)
+    await _wait_for(lambda: coordinator.current_transaction_id == "tx-19")
+    await _wait_for(lambda: sim.stored_default_limit == 32.0)
+
+
 @pytest.fixture
 def coordinator():
     hass = MagicMock()
@@ -237,8 +250,7 @@ async def test_issue19_resume_keeps_configured_limit(sim_setup):
     sim, coordinator = sim_setup
 
     # 1. Active session, charging
-    await sim.send_transaction_event("Started", "Charging", seq_no=1)
-    await _wait_for(lambda: coordinator.current_transaction_id == "tx-19")
+    await _start_session(sim, coordinator)
 
     # 2. User limits the current to 6A - both profiles land on the wallbox
     assert await coordinator.async_set_current_limit(6.0) is True
@@ -301,8 +313,7 @@ async def test_issue14_notify_ev_charging_needs_answered_cleanly(sim_setup):
     every SetChargingProfile stopped being applied.
     """
     sim, coordinator = sim_setup
-    await sim.send_transaction_event("Started", "Charging", seq_no=1)
-    await _wait_for(lambda: coordinator.current_transaction_id == "tx-19")
+    await _start_session(sim, coordinator)
 
     await sim.send_notify_ev_charging_needs()
     # csms_results[0] is the TransactionEvent reply; [1] is the notify's
@@ -326,8 +337,7 @@ async def test_issue14_consecutive_limit_changes_never_poison(sim_setup):
     poison latch and every later change fails.
     """
     sim, coordinator = sim_setup
-    await sim.send_transaction_event("Started", "Charging", seq_no=1)
-    await _wait_for(lambda: coordinator.current_transaction_id == "tx-19")
+    await _start_session(sim, coordinator)
 
     for amps in (6.0, 20.0, 12.0, 16.0):
         assert await coordinator.async_set_current_limit(amps) is True, (
@@ -352,8 +362,7 @@ async def test_issue14_pause_resume_cycle_survives_duplicate_quirk(sim_setup):
     without a single rejection.
     """
     sim, coordinator = sim_setup
-    await sim.send_transaction_event("Started", "Charging", seq_no=1)
-    await _wait_for(lambda: coordinator.current_transaction_id == "tx-19")
+    await _start_session(sim, coordinator)
     coordinator.data["power"] = 4000.0
 
     assert await coordinator.async_set_current_limit(6.0) is True
