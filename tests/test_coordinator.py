@@ -959,6 +959,105 @@ async def test_set_current_limit_clears_profiles_first_with_transaction(coordina
     ]
 
 
+async def test_set_current_limit_survives_cancellation(coordinator):
+    """A cancelled service call must not abort the profile sequence.
+
+    HA cancels in-flight service calls when a ``mode: restart`` automation
+    re-triggers. An abort between ClearChargingProfile and SetChargingProfile
+    left the wallbox with no profile at all and orphaned the late reply in the
+    ocpp response queue. The shielded sequence must run to completion even
+    when the caller is cancelled mid-flight.
+    """
+    release = asyncio.Event()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+
+    async def slow_call(payload):
+        await release.wait()
+        return mock_response
+
+    mock_cp = MagicMock()
+    mock_cp.call = AsyncMock(side_effect=slow_call)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    task = asyncio.create_task(coordinator.async_set_current_limit(13.0))
+    # Let the sequence start and block on the first (Clear) call, then cancel
+    # the caller - exactly what HA does to the running automation action.
+    await asyncio.sleep(0)
+    while not mock_cp.call.call_args_list:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Unblock the wallbox replies; the shielded sequence must still finish.
+    release.set()
+    async with asyncio.timeout(1):
+        while coordinator.data.get("current_limit") != 13.0:
+            await asyncio.sleep(0)
+
+    sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
+    assert sent[0] == "ClearChargingProfile"
+    assert _profile_purposes(mock_cp.call) == [
+        ChargingProfilePurposeEnumType.tx_profile,
+        ChargingProfilePurposeEnumType.tx_default_profile,
+    ]
+
+
+async def test_set_current_limit_sequences_do_not_interleave(coordinator):
+    """A shielded sequence that outlived its caller must finish before the next.
+
+    Without sequence-level serialisation, the newer SetChargingProfile reuses
+    ids 999/998 without a Clear in between and the Delta firmware rejects it
+    as a duplicate - the newest limit would silently fail to apply.
+    """
+    release = asyncio.Event()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+
+    async def slow_call(payload):
+        await release.wait()
+        return mock_response
+
+    mock_cp = MagicMock()
+    mock_cp.call = AsyncMock(side_effect=slow_call)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    # First limit change gets cancelled mid-Clear (automation restart) ...
+    task1 = asyncio.create_task(coordinator.async_set_current_limit(15.0))
+    await asyncio.sleep(0)
+    while not mock_cp.call.call_args_list:
+        await asyncio.sleep(0)
+    task1.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task1
+
+    # ... and the restarted automation immediately requests a new limit.
+    task2 = asyncio.create_task(coordinator.async_set_current_limit(19.0))
+    await asyncio.sleep(0)
+    release.set()
+    assert await task2 is True
+
+    # Old sequence ran to completion first, then the new one - no interleaving.
+    sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
+    assert sent == [
+        "ClearChargingProfile",
+        "SetChargingProfile",
+        "SetChargingProfile",
+        "ClearChargingProfile",
+        "SetChargingProfile",
+        "SetChargingProfile",
+    ]
+    limits = [
+        msg.charging_profile.charging_schedule[0].charging_schedule_period[0].limit
+        for msg in _set_profile_messages(mock_cp.call)
+    ]
+    assert limits == [15.0, 15.0, 19.0, 19.0]
+    assert coordinator.data["current_limit"] == 19.0
+
+
 async def test_set_current_limit_no_clear_without_transaction(coordinator):
     """Without a session there is nothing to clear - TxDefault goes out alone."""
     mock_cp = MagicMock()
