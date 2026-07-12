@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.5] - 2026-07-12
+
+### Fixed
+
+- **Current-limit changes could be lost or leave the wallbox unrestricted when driven by a `mode: restart` automation** - Home Assistant cancels the in-flight service call when such an automation re-triggers mid-adjustment. A cancellation between `ClearChargingProfile` and `SetChargingProfile` left the wallbox with no profile at all, and the wallbox's late reply was orphaned in the OCPP response queue (`Ignoring response with unknown unique id`), desyncing subsequent calls. The clear/set sequence now runs shielded from cancellation and whole sequences are serialised, so a cancelled caller can neither abort the sequence mid-flight nor interleave it with the next one ([#21](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/pull/21))
+
 ## [1.7.4] - 2026-07-11
 
 ### Added
