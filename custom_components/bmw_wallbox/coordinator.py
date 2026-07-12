@@ -586,6 +586,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         self.device_info: dict[str, Any] = {}
         # Serialises every outbound OCPP call (see _ocpp_call, issue #14).
         self._call_lock = asyncio.Lock()
+        # Serialises whole limit-change sequences (see async_set_current_limit).
+        self._limit_lock = asyncio.Lock()
 
         # Initialize data
         self.data: dict[str, Any] = {
@@ -1619,6 +1621,14 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         TxProfile bound to the active transaction so it takes effect immediately
         on the current session.
 
+        The OCPP sequence runs shielded from cancellation. HA cancels in-flight
+        service calls when e.g. a ``mode: restart`` automation re-triggers; an
+        abort between ClearChargingProfile and SetChargingProfile left the
+        wallbox with no profile at all, and the wallbox's late reply was
+        orphaned in the ocpp response queue ("Ignoring response with unknown
+        unique id"). The shield lets the sequence finish in the background
+        while the cancellation still propagates to the caller.
+
         Args:
             limit: Current limit in Amps (max = full speed)
 
@@ -1628,7 +1638,21 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if not self.charge_point:
             _LOGGER.error("❌ No wallbox connected - cannot set current limit")
             return False
+        return await asyncio.shield(self._set_current_limit(limit))
 
+    async def _set_current_limit(self, limit: float) -> bool:
+        """Run the clear/set profile sequence (see async_set_current_limit).
+
+        ``_limit_lock`` serialises whole sequences: a shielded sequence that
+        outlived its cancelled caller must not interleave with the next one,
+        or the newer SetChargingProfile reuses ids 999/998 without a Clear in
+        between and the Delta firmware rejects it as a duplicate.
+        """
+        async with self._limit_lock:
+            return await self._run_limit_sequence(limit)
+
+    async def _run_limit_sequence(self, limit: float) -> bool:
+        """Clear existing profiles and install the new limit."""
         _LOGGER.info(
             "⚡ Setting current limit to %sA (tx=%s)",
             limit,
