@@ -9,9 +9,10 @@ from ocpp.routing import on
 from ocpp.v201 import ChargePoint as cp
 from ocpp.v201 import call, call_result
 
+
 class WallboxChargePoint(cp):
     """ChargePoint handler for the BMW wallbox."""
-    
+
     @on("MessageName")
     async def on_message_name(self, param1, param2, **kwargs):
         # Handle incoming message
@@ -63,12 +64,13 @@ The `@on("MessageName")` decorator from `ocpp.routing` registers a method as a h
 ```python
 from ocpp.routing import on
 
+
 @on("BootNotification")  # Message type to handle
 async def on_boot_notification(
     self,
-    charging_station,    # Required parameter from message
-    reason,              # Required parameter from message
-    **kwargs             # Catch any additional optional parameters
+    charging_station,  # Required parameter from message
+    reason,  # Required parameter from message
+    **kwargs,  # Catch any additional optional parameters
 ):
     # Process message
     # Return response
@@ -161,25 +163,27 @@ async def on_status_notification(
     """Handle StatusNotification."""
     _LOGGER.debug(
         "Status: EVSE=%s, Connector=%s, Status=%s",
-        evse_id, connector_id, connector_status,
+        evse_id,
+        connector_id,
+        connector_status,
     )
-    
+
     # Update coordinator data
     self.coordinator.data["connector_status"] = connector_status
     self.coordinator.data["evse_id"] = evse_id
     self.coordinator.data["connector_id"] = connector_id
-    
+
     # Trigger entity updates
     self.coordinator.async_set_updated_data(self.coordinator.data)
-    
+
     return call_result.StatusNotification()
 ```
 
 **Input Schema:**
 ```python
 {
-    "timestamp": str,           # ISO 8601
-    "connector_status": str,    # "Available", "Occupied", "Reserved", etc.
+    "timestamp": str,  # ISO 8601
+    "connector_status": str,  # "Available", "Occupied", "Reserved", etc.
     "evse_id": int,
     "connector_id": int,
 }
@@ -253,54 +257,58 @@ flowchart TB
 @on("TransactionEvent")
 async def on_transaction_event(
     self,
-    event_type,          # "Started", "Updated", "Ended"
-    timestamp,           # ISO 8601
-    trigger_reason,      # "Authorized", "MeterValuePeriodic", etc.
-    seq_no,              # Sequence number
-    transaction_info,    # Contains transaction_id, charging_state
-    **kwargs,            # Contains id_token, meter_value, etc.
+    event_type,  # "Started", "Updated", "Ended"
+    timestamp,  # ISO 8601
+    trigger_reason,  # "Authorized", "MeterValuePeriodic", etc.
+    seq_no,  # Sequence number
+    transaction_info,  # Contains transaction_id, charging_state
+    **kwargs,  # Contains id_token, meter_value, etc.
 ):
     """Handle TransactionEvent - contains all the sensor data!"""
     _LOGGER.debug(
         "Transaction Event: type=%s, reason=%s, seq=%s",
-        event_type, trigger_reason, seq_no,
+        event_type,
+        trigger_reason,
+        seq_no,
     )
-    
+
     # Extract transaction ID
     self.current_transaction_id = transaction_info.get("transaction_id")
     self.coordinator.current_transaction_id = self.current_transaction_id
-    
+
     # Update basic transaction info
-    self.coordinator.data.update({
-        "transaction_id": self.current_transaction_id,
-        "charging_state": transaction_info.get("charging_state", "Unknown"),
-        "event_type": event_type,
-        "trigger_reason": trigger_reason,
-        "sequence_number": seq_no,
-        "last_update": timestamp,
-        "stopped_reason": transaction_info.get("stopped_reason"),
-    })
-    
+    self.coordinator.data.update(
+        {
+            "transaction_id": self.current_transaction_id,
+            "charging_state": transaction_info.get("charging_state", "Unknown"),
+            "event_type": event_type,
+            "trigger_reason": trigger_reason,
+            "sequence_number": seq_no,
+            "last_update": timestamp,
+            "stopped_reason": transaction_info.get("stopped_reason"),
+        }
+    )
+
     # Extract ID token (RFID)
     id_token = kwargs.get("id_token", {})
     if id_token:
         self.coordinator.data["id_token"] = id_token.get("id_token")
         self.coordinator.data["id_token_type"] = id_token.get("type")
-    
+
     # Extract meter values
     meter_value = kwargs.get("meter_value", [])
     if meter_value:
         for mv in meter_value:
             for sample in mv.get("sampled_value", []):
                 self._process_sampled_value(sample)
-    
+
     # Extract phases
     if "number_of_phases_used" in kwargs:
         self.coordinator.data["phases_used"] = kwargs["number_of_phases_used"]
-    
+
     # Trigger entity updates
     self.coordinator.async_set_updated_data(self.coordinator.data)
-    
+
     return call_result.TransactionEvent()
 ```
 
@@ -342,18 +350,18 @@ if meter_value:
         for sample in mv.get("sampled_value", []):
             measurand = sample.get("measurand")
             value = sample.get("value")
-            phase = sample.get("phase")       # "L1", "L2", "L3", or None
-            context = sample.get("context")   # "Sample.Periodic", etc.
-            location = sample.get("location") # "Outlet", "Cable", "EV"
-            
+            phase = sample.get("phase")  # "L1", "L2", "L3", or None
+            context = sample.get("context")  # "Sample.Periodic", etc.
+            location = sample.get("location")  # "Outlet", "Cable", "EV"
+
             # Power measurements
             if measurand == "Power.Active.Import":
                 self.coordinator.data["power"] = float(value)
-            
+
             # Energy measurements
             elif measurand == "Energy.Active.Import.Register":
                 self.coordinator.data["energy_total"] = float(value) / 1000  # Wh to kWh
-            
+
             # Current measurements (per phase)
             elif measurand == "Current.Import":
                 if phase == "L1":
@@ -364,7 +372,7 @@ if meter_value:
                     self.coordinator.data["current_l3"] = float(value)
                 else:
                     self.coordinator.data["current"] = float(value)
-            
+
             # Voltage measurements (per phase)
             elif measurand == "Voltage":
                 if phase in ("L1", "L1-N"):
@@ -375,7 +383,7 @@ if meter_value:
                     self.coordinator.data["voltage_l3"] = float(value)
                 else:
                     self.coordinator.data["voltage"] = float(value)
-            
+
             # Other measurements
             elif measurand == "Frequency":
                 self.coordinator.data["frequency"] = float(value)
@@ -415,7 +423,9 @@ if meter_value:
 
 ```python
 @on("NotifyReport")
-async def on_notify_report(self, request_id, seq_no, generated_at, report_data, **kwargs):
+async def on_notify_report(
+    self, request_id, seq_no, generated_at, report_data, **kwargs
+):
     """Handle NotifyReport - configuration data."""
     _LOGGER.debug("Notify Report: request_id=%s, seq=%s", request_id, seq_no)
     return call_result.NotifyReport()
@@ -458,15 +468,16 @@ flowchart TD
 ```python
 # coordinator.py - command pattern
 
+
 async def async_some_command(self) -> dict:
     """Send command to wallbox."""
     result = {"success": False, "message": ""}
-    
+
     # Check connection
     if not self.charge_point:
         result["message"] = "Wallbox not connected"
         return result
-    
+
     try:
         # Send command with timeout
         response = await asyncio.wait_for(
@@ -476,18 +487,18 @@ async def async_some_command(self) -> dict:
                     param2=value2,
                 )
             ),
-            timeout=15.0  # 15 second timeout
+            timeout=15.0,  # 15 second timeout
         )
-        
+
         # Check response
         if response.status == ExpectedStatus.accepted:
             result["success"] = True
             result["message"] = "Command accepted"
         else:
             result["message"] = f"Rejected: {response.status}"
-        
+
         return result
-        
+
     except asyncio.TimeoutError:
         result["message"] = "Command timed out"
         _LOGGER.error("Command timed out!")
@@ -525,7 +536,7 @@ response = await asyncio.wait_for(
             evse_id=1,
         )
     ),
-    timeout=15.0
+    timeout=15.0,
 )
 
 if response.status == RequestStartStopStatusEnumType.accepted:
@@ -581,7 +592,7 @@ schedule = ChargingScheduleType(
     charging_schedule_period=[
         ChargingSchedulePeriodType(
             start_period=0,
-            limit=32.0  # Amps (0 = pause, 32 = full)
+            limit=32.0,  # Amps (0 = pause, 32 = full)
         )
     ],
 )
@@ -600,7 +611,7 @@ response = await asyncio.wait_for(
     self.charge_point.call(
         call.SetChargingProfile(evse_id=1, charging_profile=profile)
     ),
-    timeout=15.0
+    timeout=15.0,
 )
 
 if response.status == "Accepted":
@@ -634,10 +645,7 @@ set_var = SetVariableDataType(
 )
 
 response = await asyncio.wait_for(
-    self.charge_point.call(
-        call.SetVariables(set_variable_data=[set_var])
-    ),
-    timeout=15.0
+    self.charge_point.call(call.SetVariables(set_variable_data=[set_var])), timeout=15.0
 )
 
 # Check result
@@ -661,10 +669,7 @@ if response.set_variable_result:
 from ocpp.v201.enums import ResetEnumType, ResetStatusEnumType
 
 response = await asyncio.wait_for(
-    self.charge_point.call(
-        call.Reset(type=ResetEnumType.immediate)
-    ),
-    timeout=15.0
+    self.charge_point.call(call.Reset(type=ResetEnumType.immediate)), timeout=15.0
 )
 
 if response.status == ResetStatusEnumType.accepted:
@@ -682,6 +687,7 @@ if response.status == ResetStatusEnumType.accepted:
 ```python
 # coordinator.py - in WallboxChargePoint class
 
+
 @on("NewMessageType")
 async def on_new_message_type(
     self,
@@ -691,13 +697,13 @@ async def on_new_message_type(
 ):
     """Handle NewMessageType from wallbox."""
     _LOGGER.debug("NewMessageType received: %s, %s", required_param1, required_param2)
-    
+
     # Extract data and update coordinator
     self.coordinator.data["new_field"] = required_param1
-    
+
     # Trigger entity updates
     self.coordinator.async_set_updated_data(self.coordinator.data)
-    
+
     # Return response
     return call_result.NewMessageType(
         response_param="value",
@@ -740,16 +746,17 @@ flowchart TB
 ```python
 # coordinator.py - in BMWWallboxCoordinator class
 
+
 async def async_new_command(self, param: int) -> dict:
     """Send new command to wallbox."""
     result = {"success": False, "message": ""}
-    
+
     if not self.charge_point:
         result["message"] = "Wallbox not connected"
         return result
-    
+
     _LOGGER.info("Sending NewCommand with param=%s", param)
-    
+
     try:
         response = await asyncio.wait_for(
             self.charge_point.call(
@@ -757,17 +764,17 @@ async def async_new_command(self, param: int) -> dict:
                     param=param,
                 )
             ),
-            timeout=15.0
+            timeout=15.0,
         )
-        
+
         if response.status == "Accepted":
             result["success"] = True
             result["message"] = "Command accepted"
         else:
             result["message"] = f"Rejected: {response.status}"
-        
+
         return result
-        
+
     except asyncio.TimeoutError:
         result["message"] = "Command timed out"
         return result

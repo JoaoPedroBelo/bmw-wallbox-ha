@@ -101,7 +101,7 @@ All OCPP commands must use `asyncio.wait_for()` with timeout:
 ```python
 response = await asyncio.wait_for(
     self.charge_point.call(call.SomeCommand(...)),
-    timeout=15.0  # Always 15 seconds
+    timeout=15.0,  # Always 15 seconds
 )
 ```
 

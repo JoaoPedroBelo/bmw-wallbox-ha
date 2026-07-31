@@ -133,23 +133,25 @@ class BMWWallboxSensorBase(CoordinatorEntity, SensorEntity):
         self,
         coordinator: BMWWallboxCoordinator,
         entry: ConfigEntry,
-        sensor_type: str,    # Unique suffix for entity ID
-        name: str,           # Display name
+        sensor_type: str,  # Unique suffix for entity ID
+        name: str,  # Display name
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        
+
         # Unique ID: {config_entry_id}_{sensor_type}
         self._attr_unique_id = f"{entry.entry_id}_{sensor_type}"
-        
+
         # Display name
         self._attr_name = name
-        
+
         # Device grouping - REQUIRED for all entities
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["charge_point_id"])},
             "name": "BMW Wallbox",
-            "manufacturer": coordinator.device_info.get("vendor", "BMW (Delta Electronics)"),
+            "manufacturer": coordinator.device_info.get(
+                "vendor", "BMW (Delta Electronics)"
+            ),
             "model": coordinator.device_info.get("model", "EIAW-E22KTSE6B04"),
             "sw_version": coordinator.device_info.get("firmware_version"),
             "serial_number": coordinator.device_info.get("serial_number"),
@@ -211,15 +213,16 @@ elif measurand == "New.Metric.Name":
 ```python
 # sensor.py - add new sensor class
 
+
 class BMWWallboxNewMetricSensor(BMWWallboxSensorBase):
     """Sensor for new metric."""
 
     def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
         super().__init__(
-            coordinator, 
-            entry, 
+            coordinator,
+            entry,
             SENSOR_NEW_METRIC,  # From const.py
-            "New Metric"        # Display name
+            "New Metric",  # Display name
         )
         # Set sensor attributes
         self._attr_device_class = SensorDeviceClass.POWER  # or appropriate class
@@ -244,11 +247,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: BMWWallboxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    async_add_entities([
-        # ... existing sensors ...
-        BMWWallboxNewMetricSensor(coordinator, entry),  # Add new sensor
-    ])
+
+    async_add_entities(
+        [
+            # ... existing sensors ...
+            BMWWallboxNewMetricSensor(coordinator, entry),  # Add new sensor
+        ]
+    )
 ```
 
 ---
@@ -277,6 +282,7 @@ self.data: dict[str, Any] = {
 ```python
 # binary_sensor.py
 
+
 class BMWWallboxNewStateBinarySensor(BMWWallboxBinarySensorBase):
     """Binary sensor for new state."""
 
@@ -295,10 +301,12 @@ class BMWWallboxNewStateBinarySensor(BMWWallboxBinarySensorBase):
 
 ```python
 # binary_sensor.py - in async_setup_entry()
-async_add_entities([
-    # ... existing ...
-    BMWWallboxNewStateBinarySensor(coordinator, entry),
-])
+async_add_entities(
+    [
+        # ... existing ...
+        BMWWallboxNewStateBinarySensor(coordinator, entry),
+    ]
+)
 ```
 
 ---
@@ -320,11 +328,10 @@ async def async_new_action(self) -> dict:
     """Perform new action."""
     if not self.charge_point:
         return {"success": False, "message": "Not connected"}
-    
+
     try:
         response = await asyncio.wait_for(
-            self.charge_point.call(call.SomeCommand(...)),
-            timeout=15.0
+            self.charge_point.call(call.SomeCommand(...)), timeout=15.0
         )
         return {"success": True, "message": "Done"}
     except Exception as err:
@@ -336,10 +343,16 @@ async def async_new_action(self) -> dict:
 ```python
 # button.py
 
+
 class BMWWallboxNewActionButton(BMWWallboxButtonBase):
     """Button for new action."""
 
-    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry, hass: HomeAssistant) -> None:
+    def __init__(
+        self,
+        coordinator: BMWWallboxCoordinator,
+        entry: ConfigEntry,
+        hass: HomeAssistant,
+    ) -> None:
         super().__init__(coordinator, entry, hass, BUTTON_NEW_ACTION)
         self._attr_name = "New Action"
         self._base_icon = "mdi:gesture-tap"
@@ -361,10 +374,12 @@ class BMWWallboxNewActionButton(BMWWallboxButtonBase):
 
 ```python
 # button.py - in async_setup_entry()
-async_add_entities([
-    # ... existing ...
-    BMWWallboxNewActionButton(coordinator, entry, hass),
-])
+async_add_entities(
+    [
+        # ... existing ...
+        BMWWallboxNewActionButton(coordinator, entry, hass),
+    ]
+)
 ```
 
 ---
@@ -386,12 +401,11 @@ async def async_set_new_setting(self, value: int) -> bool:
     """Set new setting value."""
     if not self.charge_point:
         return False
-    
+
     try:
         # Send OCPP command
         response = await asyncio.wait_for(
-            self.charge_point.call(call.SetVariables(...)),
-            timeout=15.0
+            self.charge_point.call(call.SetVariables(...)), timeout=15.0
         )
         return response.status == "Accepted"
     except Exception:
@@ -402,6 +416,7 @@ async def async_set_new_setting(self, value: int) -> bool:
 
 ```python
 # number.py
+
 
 class BMWWallboxNewSettingNumber(CoordinatorEntity, NumberEntity):
     """Number entity for new setting."""
@@ -440,10 +455,12 @@ class BMWWallboxNewSettingNumber(CoordinatorEntity, NumberEntity):
 
 ```python
 # number.py - in async_setup_entry()
-async_add_entities([
-    # ... existing ...
-    BMWWallboxNewSettingNumber(coordinator, entry),
-])
+async_add_entities(
+    [
+        # ... existing ...
+        BMWWallboxNewSettingNumber(coordinator, entry),
+    ]
+)
 ```
 
 ---
@@ -461,6 +478,7 @@ SWITCH_NEW_TOGGLE: Final = "new_toggle"
 
 ```python
 # switch.py
+
 
 class BMWWallboxNewToggleSwitch(CoordinatorEntity, SwitchEntity):
     """Switch entity for new toggle."""
@@ -497,7 +515,6 @@ Some entities change icon based on state. Example from `sensor.py`:
 
 ```python
 class BMWWallboxStatusSensor(BMWWallboxSensorBase):
-    
     @property
     def icon(self) -> str:
         """Return icon based on status."""
@@ -525,7 +542,6 @@ Add additional data to entities via `extra_state_attributes`:
 
 ```python
 class BMWWallboxStateSensor(BMWWallboxSensorBase):
-    
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
@@ -543,11 +559,10 @@ Control when entities are available:
 
 ```python
 class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
-    
     @property
     def available(self) -> bool:
         """Return True if entity is available.
-        
+
         Current limit only works when there's an active transaction.
         """
         return (

@@ -204,6 +204,7 @@ Used for `extra_state_attributes` keys.
 ```python
 from .const import ATTR_TRANSACTION_ID, ATTR_CHARGING_STATE
 
+
 @property
 def extra_state_attributes(self) -> dict[str, Any]:
     return {
@@ -264,6 +265,7 @@ from .const import SENSOR_NEW_METRIC
 
 ```python
 """Constants for the BMW Wallbox integration."""
+
 from typing import Final
 
 DOMAIN: Final = "bmw_wallbox"

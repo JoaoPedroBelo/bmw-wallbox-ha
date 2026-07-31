@@ -100,7 +100,9 @@ await coordinator.async_stop_server()
 **Location:** `coordinator.py:616-805`
 
 ```python
-async def async_start_charging(self, status_callback=None, allow_nuke: bool = True) -> dict:
+async def async_start_charging(
+    self, status_callback=None, allow_nuke: bool = True
+) -> dict:
     """Start/resume charging using SetChargingProfile(32A)."""
 ```
 
@@ -113,9 +115,9 @@ async def async_start_charging(self, status_callback=None, allow_nuke: bool = Tr
 **Returns:**
 ```python
 {
-    "success": bool,    # True if charging started/resumed
-    "message": str,     # User-friendly message
-    "action": str,      # "started", "resumed", "already_charging", "rejected", "nuked", "failed"
+    "success": bool,  # True if charging started/resumed
+    "message": str,  # User-friendly message
+    "action": str,  # "started", "resumed", "already_charging", "rejected", "nuked", "failed"
 }
 ```
 
@@ -498,17 +500,14 @@ See `OCPP_HANDLERS.md` for detailed handler documentation.
 Use the inherited `call()` method:
 
 ```python
-response = await self.charge_point.call(
-    call.CommandName(param=value)
-)
+response = await self.charge_point.call(call.CommandName(param=value))
 ```
 
 Always wrap in `asyncio.wait_for()` with timeout:
 
 ```python
 response = await asyncio.wait_for(
-    self.charge_point.call(call.CommandName(...)),
-    timeout=15.0
+    self.charge_point.call(call.CommandName(...)), timeout=15.0
 )
 ```
 
