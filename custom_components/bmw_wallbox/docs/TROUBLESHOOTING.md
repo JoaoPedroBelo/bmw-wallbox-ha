@@ -342,7 +342,7 @@ Source: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-sta
    # Default is 15 seconds
    response = await asyncio.wait_for(
        self.charge_point.call(...),
-       timeout=15.0  # Increase if needed
+       timeout=15.0,  # Increase if needed
    )
    ```
 
@@ -394,6 +394,7 @@ Add temporary logging to see all data:
 ```python
 # In any entity or handler
 import json
+
 _LOGGER.debug("Coordinator data: %s", json.dumps(self.coordinator.data, default=str))
 ```
 
@@ -417,12 +418,12 @@ Create a simple script to test:
 import asyncio
 from ocpp.v201 import call
 
+
 async def test_command():
     # ... setup charge_point ...
-    response = await charge_point.call(
-        call.SetChargingProfile(...)
-    )
+    response = await charge_point.call(call.SetChargingProfile(...))
     print(f"Response: {response}")
+
 
 asyncio.run(test_command())
 ```
@@ -433,8 +434,7 @@ Check if entity is in Home Assistant:
 
 ```python
 # In __init__.py after platform setup
-_LOGGER.info("Registered entities: %s", 
-    [e.entity_id for e in hass.states.async_all()])
+_LOGGER.info("Registered entities: %s", [e.entity_id for e in hass.states.async_all()])
 ```
 
 ---

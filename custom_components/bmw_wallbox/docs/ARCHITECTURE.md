@@ -279,12 +279,13 @@ ssl_context.load_cert_chain(cert_path, key_path)
 
 # 2. Start WebSocket server (runs in background)
 self.server = await websockets.serve(
-    on_connect,           # Handler for new connections
-    "0.0.0.0",            # Listen on all interfaces
+    on_connect,  # Handler for new connections
+    "0.0.0.0",  # Listen on all interfaces
     self.config["port"],  # Default: 9000
     subprotocols=["ocpp2.0.1"],
     ssl=ssl_context,
 )
+
 
 # 3. on_connect creates WallboxChargePoint and starts message loop
 async def on_connect(websocket):
@@ -297,11 +298,13 @@ async def on_connect(websocket):
 ```python
 # Entities extend CoordinatorEntity which handles automatic updates
 
+
 class BMWWallboxPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         # Called automatically when coordinator.data updates
         return self.coordinator.data.get("power")
+
 
 # In coordinator, after processing OCPP message:
 self.data["power"] = new_value

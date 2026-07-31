@@ -216,13 +216,12 @@ async def async_command(self) -> dict:
         "message": "",
         "action": "failed",
     }
-    
+
     try:
         response = await asyncio.wait_for(
-            self.charge_point.call(call.Command(...)),
-            timeout=15.0
+            self.charge_point.call(call.Command(...)), timeout=15.0
         )
-        
+
         if response.status == "Accepted":
             result["success"] = True
             result["message"] = "Command accepted"
@@ -230,9 +229,9 @@ async def async_command(self) -> dict:
         else:
             result["message"] = f"Rejected: {response.status}"
             result["action"] = "rejected"
-        
+
         return result
-        
+
     except asyncio.TimeoutError:
         result["message"] = "Command timed out"
         _LOGGER.error("Command timed out!")
@@ -314,9 +313,7 @@ self._attr_device_info = {
 ```python
 # ❌ WRONG: Causes stuck transaction states
 response = await self.charge_point.call(
-    call.RequestStopTransaction(
-        transaction_id=self.current_transaction_id
-    )
+    call.RequestStopTransaction(transaction_id=self.current_transaction_id)
 )
 # After this, wallbox enters "Finishing" state - cannot restart!
 
@@ -409,8 +406,10 @@ class BMWWallboxPowerSensor(BMWWallboxSensorBase):
 # ❌ WRONG: Blocking call
 async def async_some_method(self):
     import time
+
     time.sleep(5)  # Blocks the event loop!
-    
+
+
 # ✅ CORRECT: Async sleep
 async def async_some_method(self):
     await asyncio.sleep(5)  # Non-blocking
@@ -428,8 +427,7 @@ response = await self.charge_point.call(call.Command(...))
 
 # ✅ CORRECT: Always use timeout
 response = await asyncio.wait_for(
-    self.charge_point.call(call.Command(...)),
-    timeout=15.0
+    self.charge_point.call(call.Command(...)), timeout=15.0
 )
 ```
 
@@ -446,8 +444,7 @@ await self.charge_point.call(call.SetChargingProfile(...))
 
 # ✅ CORRECT: Check result
 response = await asyncio.wait_for(
-    self.charge_point.call(call.SetChargingProfile(...)),
-    timeout=15.0
+    self.charge_point.call(call.SetChargingProfile(...)), timeout=15.0
 )
 if response.status != "Accepted":
     _LOGGER.warning("Command rejected: %s", response.status)
@@ -466,6 +463,7 @@ self._attr_unique_id = f"{entry.entry_id}_power"  # "power" is magic string
 
 # ✅ CORRECT: Use constants
 from .const import SENSOR_POWER
+
 self._attr_unique_id = f"{entry.entry_id}_{SENSOR_POWER}"
 ```
 
