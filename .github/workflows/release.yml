@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true
 
       - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@ab22029681aa532bfe7de5774a9972d67bfbd2c0 # master @ 2026-07-31
+        uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb # master @ 2026-07-31
 
   test:
     name: Run Tests
