@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.6] - 2026-08-15
+
+### Fixed
+
+- **Current-limit changes were reported as applied while the car kept charging at the old limit** - a `TxDefaultProfile` only takes effect from the START of the next transaction, so it cannot limit a session already in progress; only the `TxProfile` can. The success check was `ok_default or ok_tx`, written for the opposite case (Delta Gen 4 rejecting the persistent `TxDefaultProfile` while honouring the per-session `TxProfile`, [#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14)). When the combination reversed, `number.charging_current_limit` reported the new value while the wallbox was still on the old one. Measured live on 2026-08-15: a 6 A limit was "applied" at 13:00:53 and the car drew 21.4 A for 14 minutes, putting the grid at 34.6 A on a 30 A supply. Because Home Assistant trusted the entity, every downstream load-management guard was blinded. With an active transaction the sequence now fails, and logs, when the `TxProfile` is rejected.
+- **The current-limit path did not refresh the transaction id before building the `TxProfile`** - a `TxProfile` is bound to a specific transaction, so a stale id makes the wallbox reject the only profile that can limit the running session. The id goes stale easily: pause/resume keep the transaction alive by design and the wallbox does not always announce a new one with `TransactionEvent(Started)`. The pause and resume paths already refreshed before acting; the limit path was the one that did not, and the one that failed.
+
 ## [1.7.5] - 2026-07-12
 
 ### Fixed

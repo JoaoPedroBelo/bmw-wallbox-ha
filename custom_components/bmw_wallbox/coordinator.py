@@ -1653,6 +1653,17 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
     async def _run_limit_sequence(self, limit: float) -> bool:
         """Clear existing profiles and install the new limit."""
+        # Re-read the transaction id from the wallbox first. A TxProfile is bound
+        # to a specific transaction, so a stale id makes the box reject the only
+        # profile that can limit the session in progress. The id goes stale
+        # easily: pause/resume keep the transaction alive on purpose, and the box
+        # does not always announce a new one with a TransactionEvent(Started) —
+        # on 2026-08-15 sensor.transaction_id held the same value across a
+        # Paused -> Car Paused -> Charging cycle while a new session ran.
+        # The pause and resume paths already refresh before acting; the limit
+        # path did not, which is why it was the one that failed.
+        await self.async_refresh_transaction_id()
+
         _LOGGER.info(
             "⚡ Setting current limit to %sA (tx=%s)",
             limit,
@@ -1698,6 +1709,33 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 profile_id=998,
                 stack_level=0,
             )
+
+            # A TxDefaultProfile applies from the START of the next transaction
+            # (OCPP 2.0.1). It does NOT touch a session that is already running.
+            # So while a transaction is live, ok_tx is the ONLY evidence that the
+            # car is actually limited; ok_default alone means "the next session
+            # will be limited" and nothing more.
+            #
+            # This used to be `if ok_default or ok_tx`, written for the opposite
+            # case (Delta Gen 4 rejecting the persistent TxDefaultProfile while
+            # honouring the per-session TxProfile, issue #14). The reverse
+            # combination silently reported success: on 2026-08-15 13:00:53 a
+            # 6 A limit was "applied" while the car kept drawing 21.4 A for
+            # 14 minutes, putting the grid at 34.6 A on a 30 A contract. Home
+            # Assistant believed the entity, so every load-management guard was
+            # blinded — the emergency branch requires `limit > 6` and the limit
+            # "was" 6. Reporting failure is what lets the caller react.
+            if self.current_transaction_id and not ok_tx:
+                _LOGGER.error(
+                    "❌ Current limit %sA NOT applied to the running session: "
+                    "TxProfile rejected (tx=%s). TxDefaultProfile accepted=%s, "
+                    "which only affects the NEXT session - the car is still on "
+                    "its previous limit",
+                    limit,
+                    self.current_transaction_id,
+                    ok_default,
+                )
+                return False
 
             if ok_default or ok_tx:
                 # Track the new limit for future start/resume/connect operations
