@@ -950,7 +950,11 @@ async def test_set_current_limit_clears_profiles_first_with_transaction(coordina
     assert await coordinator.async_set_current_limit(13.0) is True
 
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
-    assert sent[0] == "ClearChargingProfile"
+    # The sequence now re-reads the transaction id first: a TxProfile is bound to
+    # a transaction, and a stale id makes the box reject the only profile that
+    # can limit the session in progress.
+    assert sent[0] == "GetTransactionStatus"
+    assert sent[1] == "ClearChargingProfile"
     # TxProfile (immediate) before TxDefaultProfile (next-session persistence)
     purposes = _profile_purposes(mock_cp.call)
     assert purposes == [
@@ -998,7 +1002,8 @@ async def test_set_current_limit_survives_cancellation(coordinator):
             await asyncio.sleep(0)
 
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
-    assert sent[0] == "ClearChargingProfile"
+    assert sent[0] == "GetTransactionStatus"
+    assert sent[1] == "ClearChargingProfile"
     assert _profile_purposes(mock_cp.call) == [
         ChargingProfilePurposeEnumType.tx_profile,
         ChargingProfilePurposeEnumType.tx_default_profile,
@@ -1043,9 +1048,11 @@ async def test_set_current_limit_sequences_do_not_interleave(coordinator):
     # Old sequence ran to completion first, then the new one - no interleaving.
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
     assert sent == [
+        "GetTransactionStatus",
         "ClearChargingProfile",
         "SetChargingProfile",
         "SetChargingProfile",
+        "GetTransactionStatus",
         "ClearChargingProfile",
         "SetChargingProfile",
         "SetChargingProfile",
@@ -1381,3 +1388,99 @@ async def test_short_external_timeout_desyncs_queue_regression(coordinator, capl
         pump.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await pump
+
+
+# ---------------------------------------------------------------------------
+# TxProfile rejection must not report success (2026-08-15)
+#
+# A TxDefaultProfile applies from the START of the next transaction; it does not
+# touch a running session. `if ok_default or ok_tx` therefore reported success
+# whenever the default landed, even though the car was still on its previous
+# limit. Live consequence: 13:00:53 a 6 A limit was "applied", the car kept
+# drawing 21.4 A for 14 minutes, and the grid sat at 34.6 A on a 30 A contract.
+# Home Assistant believed the entity, so every load guard was blinded — the
+# emergency branch requires `limit > 6` and the limit "was" 6.
+# ---------------------------------------------------------------------------
+
+
+def _profile_response(accepted_purposes):
+    """Accept SetChargingProfile only for the listed purposes."""
+
+    async def call(payload):
+        response = MagicMock()
+        response.status_info = None
+        if type(payload).__name__ == "SetChargingProfile":
+            purpose = payload.charging_profile.charging_profile_purpose
+            response.status = "Accepted" if purpose in accepted_purposes else "Rejected"
+        else:
+            response.status = "Accepted"
+        return response
+
+    return call
+
+
+async def test_limit_fails_when_tx_profile_rejected_during_session(coordinator):
+    """Session live + TxProfile rejected => failure, even if default accepted."""
+    mock_cp = MagicMock()
+    mock_cp.call = AsyncMock(
+        side_effect=_profile_response(
+            {ChargingProfilePurposeEnumType.tx_default_profile}
+        )
+    )
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+    coordinator.async_refresh_transaction_id = AsyncMock()
+
+    assert await coordinator.async_set_current_limit(6.0) is False
+    # The entity must NOT claim the car is limited when it is not.
+    assert coordinator.data.get("current_limit") != 6.0
+
+
+async def test_limit_succeeds_when_tx_profile_accepted_and_default_rejected(
+    coordinator,
+):
+    """The original issue #14 case still passes: only the TxProfile matters."""
+    mock_cp = MagicMock()
+    mock_cp.call = AsyncMock(
+        side_effect=_profile_response({ChargingProfilePurposeEnumType.tx_profile})
+    )
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+    coordinator.async_refresh_transaction_id = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+
+    assert await coordinator.async_set_current_limit(6.0) is True
+    assert coordinator.data["current_limit"] == 6.0
+
+
+async def test_limit_succeeds_with_default_only_when_no_session(coordinator):
+    """With no transaction there is nothing to limit now; the default is enough."""
+    mock_cp = MagicMock()
+    mock_cp.call = AsyncMock(
+        side_effect=_profile_response(
+            {ChargingProfilePurposeEnumType.tx_default_profile}
+        )
+    )
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = None
+    coordinator.async_refresh_transaction_id = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+
+    assert await coordinator.async_set_current_limit(16.0) is True
+    assert coordinator.data["current_limit"] == 16.0
+
+
+async def test_limit_sequence_refreshes_transaction_id_first(coordinator):
+    """A stale transaction id is what made the box reject the TxProfile."""
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_response.status_info = None
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "stale-tx"
+    coordinator.async_refresh_transaction_id = AsyncMock()
+
+    await coordinator.async_set_current_limit(16.0)
+
+    coordinator.async_refresh_transaction_id.assert_awaited_once()
