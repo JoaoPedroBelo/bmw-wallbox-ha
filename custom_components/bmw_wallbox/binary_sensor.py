@@ -9,11 +9,17 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import BINARY_SENSOR_CHARGING, BINARY_SENSOR_CONNECTED, DOMAIN
+from .const import (
+    BINARY_SENSOR_CHARGING,
+    BINARY_SENSOR_CONNECTED,
+    BINARY_SENSOR_FAULT,
+    DOMAIN,
+)
 from .coordinator import BMWWallboxCoordinator
 
 
@@ -30,6 +36,7 @@ async def async_setup_entry(
             # Connection status should be first (most important!)
             BMWWallboxConnectedBinarySensor(coordinator, entry),
             BMWWallboxChargingBinarySensor(coordinator, entry),
+            BMWWallboxFaultBinarySensor(coordinator, entry),
         ]
     )
 
@@ -98,3 +105,45 @@ class BMWWallboxConnectedBinarySensor(BMWWallboxBinarySensorBase):
         return {
             "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
         }
+
+
+class BMWWallboxFaultBinarySensor(BMWWallboxBinarySensorBase):
+    """Fault indicator (connector Faulted or a stuck transaction-bound TxProfile).
+
+    A mid-session connector ``Faulted`` is what silently orphaned the
+    transaction on the Delta firmware (issue #25); ``stuck_tx_profile`` flags a
+    leftover TxProfile the box refuses to clear (reboot needed). Entity only -
+    the integration never sends push notifications; the user wires their own.
+    """
+
+    def __init__(
+        self,
+        coordinator: BMWWallboxCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the fault binary sensor."""
+        super().__init__(coordinator, entry, BINARY_SENSOR_FAULT)
+        self._attr_name = "Fault"
+        self._attr_device_class = BinarySensorDeviceClass.PROBLEM
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def is_on(self) -> bool:
+        """Return True when the wallbox reports a fault or a stuck profile."""
+        return bool(
+            self.coordinator.data.get("wallbox_fault")
+            or self.coordinator.data.get("stuck_tx_profile")
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Return the last fault reason and whether a profile is stuck."""
+        attrs: dict[str, str] = {}
+        if self.coordinator.data.get("last_fault"):
+            attrs["last_fault"] = self.coordinator.data["last_fault"]
+        if self.coordinator.data.get("last_fault_time"):
+            attrs["last_fault_time"] = self.coordinator.data["last_fault_time"]
+        attrs["stuck_tx_profile"] = str(
+            bool(self.coordinator.data.get("stuck_tx_profile"))
+        )
+        return attrs

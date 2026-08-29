@@ -134,10 +134,26 @@ class OptionsFlow(config_entries.OptionsFlow):
             CONF_RFID_TOKEN,
             self.config_entry.data.get(CONF_RFID_TOKEN, ""),
         )
-        current_max = self.config_entry.options.get(
-            CONF_MAX_CURRENT,
-            self.config_entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+        # The wallbox-reported max (GetVariables MaxCurrent, stored on the
+        # coordinator) is the hard ceiling for "Maximum Current (A)": you can pick
+        # any limit between the 6 A minimum and whatever the box reports. If the
+        # box says 25 A you cannot go above 25; if it reported 300 the slider would
+        # go to 300. Until the box has reported, fall back to a generous 63 A.
+        domain_data = self.hass.data.get(DOMAIN) or {}
+        coordinator = (
+            domain_data.get(self.config_entry.entry_id) if domain_data else None
         )
+        wallbox_max = coordinator.data.get("max_current_a") if coordinator else None
+        max_ceiling = int(wallbox_max) if wallbox_max else 63
+
+        configured_max = self.config_entry.options.get(
+            CONF_MAX_CURRENT,
+            int(wallbox_max)
+            if wallbox_max
+            else self.config_entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+        )
+        # Never present a default above the ceiling the box allows.
+        current_max = max(6, min(int(configured_max), max_ceiling))
         current_scan = self.config_entry.options.get(
             CONF_SCAN_INTERVAL,
             self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -149,7 +165,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(CONF_RFID_TOKEN, default=current_rfid): str,
                     vol.Optional(CONF_MAX_CURRENT, default=current_max): vol.All(
-                        vol.Coerce(int), vol.Range(min=6, max=63)
+                        vol.Coerce(int), vol.Range(min=6, max=max_ceiling)
                     ),
                     vol.Optional(CONF_SCAN_INTERVAL, default=current_scan): vol.All(
                         vol.Coerce(int), vol.Range(min=5, max=60)

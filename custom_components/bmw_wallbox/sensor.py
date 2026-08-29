@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -43,6 +44,8 @@ async def async_setup_entry(
             # === ELECTRICAL MEASUREMENTS ===
             BMWWallboxCurrentSensor(coordinator, entry),
             BMWWallboxVoltageSensor(coordinator, entry),
+            BMWWallboxEnforcedLimitSensor(coordinator, entry),
+            BMWWallboxMaxCurrentSensor(coordinator, entry),
             # === CONNECTION & TRANSACTION INFO ===
             BMWWallboxConnectorStatusSensor(coordinator, entry),
             BMWWallboxTransactionIDSensor(coordinator, entry),
@@ -478,3 +481,51 @@ class BMWWallboxSequenceNumberSensor(BMWWallboxSensorBase):
     def native_value(self) -> int | None:
         """Return sequence number."""
         return self.coordinator.data.get("sequence_number")
+
+
+class BMWWallboxEnforcedLimitSensor(BMWWallboxSensorBase):
+    """The current limit the wallbox is ACTUALLY enforcing (GetCompositeSchedule).
+
+    The ``number.charging_current_limit`` entity shows what HA asked for; this
+    shows what the box computed and is really applying, so a rejected/ignored
+    limit is visible instead of silent (issue #25).
+    """
+
+    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator, entry, "enforced_current_limit", "Enforced Current Limit"
+        )
+        self._attr_device_class = SensorDeviceClass.CURRENT
+        self._attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:speedometer"
+        self._attr_suggested_display_precision = 1
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the enforced limit in amperes."""
+        return self.coordinator.data.get("enforced_limit_a")
+
+
+class BMWWallboxMaxCurrentSensor(BMWWallboxSensorBase):
+    """Hardware max charging current configured on the wallbox (GetVariables).
+
+    The real ceiling (e.g. 32 A) read from the device model, useful as the upper
+    bound for load management instead of a hard-coded value (feature #5).
+    """
+
+    def __init__(self, coordinator: BMWWallboxCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator, entry, "max_charging_current", "Max Charging Current"
+        )
+        self._attr_device_class = SensorDeviceClass.CURRENT
+        self._attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+        self._attr_icon = "mdi:car-speed-limiter"
+        self._attr_suggested_display_precision = 0
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the configured hardware max current in amperes."""
+        return self.coordinator.data.get("max_current_a")

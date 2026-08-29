@@ -255,6 +255,28 @@ flowchart TD
 
 ---
 
+### Issue: Limit changes don't apply mid-session (orphaned profile) — fixed in 1.8.0
+
+**Symptoms:**
+- You raise/lower `number.charging_current_limit` and the car keeps drawing the old current.
+- Only a wallbox reboot restores control.
+
+**Cause:** older versions installed a transaction-bound `TxProfile` (id 999). After
+a mid-session `SuspendedEVSE`/connector-`Faulted` event the Delta firmware refuses
+to clear or replace it, so the transaction is "orphaned" and every limit change is
+silently rejected until reboot.
+
+**Fix (1.8.0):** the integration now installs **only a `TxDefaultProfile`** (issue
+#25) — nothing can get stuck to a transaction. If you are on an older version and
+currently orphaned, reboot the wallbox once; from then on it will not recur.
+
+**Diagnose:** `sensor.enforced_current_limit` shows what the box is really
+enforcing (vs the requested `number`), and `binary_sensor.fault` surfaces a
+connector fault and a `stuck_tx_profile` flag (with the reason as an attribute;
+Home Assistant history gives the timeline).
+
+---
+
 ### Issue: Stuck Transaction / Cannot Start Charging
 
 **Symptoms:**

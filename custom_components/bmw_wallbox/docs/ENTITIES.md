@@ -4,11 +4,20 @@
 
 | Platform | File | Count | Base Class |
 |----------|------|-------|------------|
-| Sensor | `sensor.py` | 19 | `BMWWallboxSensorBase` |
-| Binary Sensor | `binary_sensor.py` | 2 | `BMWWallboxBinarySensorBase` |
+| Sensor | `sensor.py` | 21 | `BMWWallboxSensorBase` |
+| Binary Sensor | `binary_sensor.py` | 3 | `BMWWallboxBinarySensorBase` |
 | Button | `button.py` | 4 | `BMWWallboxButtonBase` |
-| Number | `number.py` | 1 | Direct `CoordinatorEntity` |
+| Number | `number.py` | 2 | Direct `CoordinatorEntity` |
 | Switch | `switch.py` | - | Not yet implemented |
+
+### Diagnostic / config entities added in 1.8.0 (issue #25 + feature #5)
+
+| Entity | Source | Purpose |
+|--------|--------|---------|
+| `sensor.enforced_current_limit` | `GetCompositeSchedule` (`data["enforced_limit_a"]`) | The limit the wallbox is *actually* enforcing, vs the requested `number` |
+| `binary_sensor.fault` | `data["wallbox_fault"]` / `data["stuck_tx_profile"]` | Connector `Faulted` or a stuck transaction-bound profile; reason + timestamp as `last_fault`/`last_fault_time` attributes (HA history gives the timeline). Entity only, no push |
+| `sensor.max_charging_current` | `GetVariables` `ChargingStation.MaxCurrent` (`data["max_current_a"]`) | Hardware max current ceiling |
+| `number.led_brightness` | `GetVariables`/`SetVariables` `StatusLedBrightness` (`data["led_brightness"]`) | LED brightness read + write |
 
 ---
 

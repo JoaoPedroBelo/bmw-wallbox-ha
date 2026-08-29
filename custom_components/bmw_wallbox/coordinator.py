@@ -8,6 +8,7 @@ Not affiliated with BMW, Delta Electronics, or any other company.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 import logging
 import ssl
@@ -22,6 +23,7 @@ from ocpp.v201.datatypes import (
     ChargingSchedulePeriodType,
     ChargingScheduleType,
     ComponentType,
+    GetVariableDataType,
     IdTokenType,
     SetVariableDataType,
     VariableType,
@@ -169,6 +171,19 @@ class WallboxChargePoint(cp):
         self.coordinator.data["connector_status"] = connector_status
         self.coordinator.data["evse_id"] = evse_id
         self.coordinator.data["connector_id"] = connector_id
+
+        # Surface a connector fault as a first-class state. A mid-session
+        # "Faulted" is exactly what silently orphaned the transaction on the
+        # Delta firmware (issue #25); it must be visible in HA, not buried in a
+        # log line. Entities only - the integration never sends notifications.
+        if connector_status == "Faulted":
+            self.coordinator.data["wallbox_fault"] = True
+            self.coordinator.data["last_fault"] = "Connector Faulted"
+            self.coordinator.data["last_fault_time"] = datetime.utcnow().isoformat()
+            _LOGGER.warning("⚠️ Connector FAULTED (EVSE=%s)", evse_id)
+        elif connector_status in ("Available", "Occupied"):
+            self.coordinator.data["wallbox_fault"] = False
+
         self.coordinator.async_set_updated_data(self.coordinator.data)
 
         return call_result.StatusNotification()
@@ -519,8 +534,24 @@ class WallboxChargePoint(cp):
 
         Some chargers send this frequently. We accept it to avoid repeated
         NotImplementedError / KeyError that can overload HA logs and event loop.
+        We also surface Alert/Fault events as a fault state so they are visible
+        in HA (entities only, no notifications - issue #25).
         """
         _LOGGER.debug("NotifyEvent received: %s", kwargs)
+        for event in kwargs.get("event_data", []) or []:
+            trigger = str(event.get("trigger", ""))
+            if trigger not in ("Alerting", "Delta"):
+                continue
+            comp = (event.get("component") or {}).get("name", "?")
+            var = (event.get("variable") or {}).get("name", "?")
+            reason = f"{comp}.{var}={event.get('actual_value', '')}"
+            tech = event.get("tech_info")
+            if tech:
+                reason += f" ({tech})"
+            self.coordinator.data["last_fault"] = reason
+            self.coordinator.data["last_fault_time"] = datetime.utcnow().isoformat()
+            _LOGGER.warning("⚠️ Wallbox NotifyEvent alert: %s", reason)
+            self.coordinator.async_set_updated_data(self.coordinator.data)
         return call_result.NotifyEvent()
 
     @on("NotifyEVChargingNeeds")
@@ -560,6 +591,46 @@ class WallboxChargePoint(cp):
         """
         _LOGGER.debug("ClearedChargingLimit received: %s", kwargs)
         return call_result.ClearedChargingLimit()
+
+    @on("ReportChargingProfiles")
+    async def on_report_charging_profiles(
+        self, request_id, charging_limit_source, charging_profile, evse_id, **kwargs
+    ):
+        """Handle ReportChargingProfiles - the reply to GetChargingProfiles.
+
+        Without a handler the ocpp library answers with a CallError
+        (NotImplementedError) and the query is lost. We store the reported
+        profiles so a diagnostic can see exactly what the wallbox has installed,
+        and warn if a transaction-bound ``TxProfile`` is present: the integration
+        never installs one anymore (issue #25), so a lingering TxProfile means a
+        profile is stuck to the transaction and mid-session limit changes will be
+        silently rejected until the wallbox is rebooted.
+        """
+        profiles = charging_profile or []
+        # tbc (to-be-continued) => more pages follow; accumulate, else replace.
+        if kwargs.get("tbc"):
+            self.coordinator.data.setdefault("installed_profiles", []).extend(profiles)
+        else:
+            existing = self.coordinator.data.get("installed_profiles", [])
+            self.coordinator.data["installed_profiles"] = existing + profiles
+
+        all_profiles = self.coordinator.data.get("installed_profiles", [])
+        stuck = [
+            p
+            for p in all_profiles
+            if p.get("charging_profile_purpose") == "TxProfile"
+            or p.get("chargingProfilePurpose") == "TxProfile"
+        ]
+        self.coordinator.data["stuck_tx_profile"] = bool(stuck)
+        if stuck:
+            _LOGGER.warning(
+                "⚠️ Wallbox has a stuck transaction-bound TxProfile installed "
+                "(%s); mid-session limit changes may be rejected until reboot: %s",
+                len(stuck),
+                stuck,
+            )
+        self.coordinator.async_set_updated_data(self.coordinator.data)
+        return call_result.ReportChargingProfiles()
 
 
 class BMWWallboxCoordinator(DataUpdateCoordinator):
@@ -669,6 +740,9 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         # so we can't rely purely on push-based updates.
         if self.charge_point and self.current_transaction_id:
             await self.async_trigger_meter_values()
+            # Read the limit the wallbox is actually enforcing (issue #25) so
+            # sensor.enforced_current_limit reflects the truth, not the request.
+            await self.async_get_composite_schedule()
         return self.data
 
     async def async_configure_wallbox_for_pause_resume(self) -> None:
@@ -759,6 +833,12 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             # Install TxDefaultProfile so the first session starts at the limit
             asyncio.create_task(self._apply_default_limit_on_connect())
 
+            # Read installed profiles for the stuck-TxProfile diagnostic (issue #25)
+            asyncio.create_task(self._get_profiles_on_connect())
+
+            # Read device-model config (hardware max current, LED brightness)
+            asyncio.create_task(self._read_config_on_connect())
+
             try:
                 await self.charge_point.start()
             except websockets.exceptions.ConnectionClosed:
@@ -784,6 +864,58 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if self.charge_point:
             _LOGGER.info("Requesting meter values on connect...")
             await self.async_trigger_meter_values()
+
+    async def _get_profiles_on_connect(self) -> None:
+        """Read installed charging profiles a few seconds after connect."""
+        await asyncio.sleep(5)
+        if self.charge_point:
+            await self.async_get_charging_profiles()
+
+    async def _read_config_on_connect(self) -> None:
+        """Read slow-changing device-model config once after connect.
+
+        The hardware max current (the real ceiling for load management) and the
+        LED brightness (issue #25 / feature #5). GetVariables is a plain read.
+        """
+        await asyncio.sleep(6)
+        if not self.charge_point:
+            return
+        max_a = await self.async_get_variable("ChargingStation", "MaxCurrent")
+        if max_a is not None:
+            with contextlib.suppress(ValueError, TypeError):
+                self.data["max_current_a"] = float(max_a)
+        led = await self.async_get_variable("StatusLED", "brightness")
+        if led is not None:
+            with contextlib.suppress(ValueError, TypeError):
+                self.data["led_brightness"] = int(float(led))
+        self.async_set_updated_data(self.data)
+
+    async def async_get_variable(self, component: str, variable: str) -> str | None:
+        """Read a single device-model variable via GetVariables (OCPP 2.0.1)."""
+        if not self.charge_point:
+            return None
+        try:
+            response = await self._ocpp_call(
+                call.GetVariables(
+                    get_variable_data=[
+                        GetVariableDataType(
+                            component=ComponentType(name=component),
+                            variable=VariableType(name=variable),
+                        )
+                    ]
+                )
+            )
+            results = getattr(response, "get_variable_result", None) or []
+            if not results:
+                return None
+            res = results[0]
+            status = res.get("attribute_status") or res.get("attributeStatus")
+            if status != "Accepted":
+                return None
+            return res.get("attribute_value") or res.get("attributeValue")
+        except Exception as err:  # best-effort read
+            _LOGGER.debug("GetVariables(%s.%s) failed: %s", component, variable, err)
+            return None
 
     async def _recover_transaction_on_connect(self) -> None:
         """Recover active transaction state after wallbox connects.
@@ -950,33 +1082,19 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                         "transaction_id"
                     )
                     if tx_id:
-                        start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                        schedule = ChargingScheduleType(
-                            id=1,
-                            start_schedule=start_time,
-                            charging_rate_unit=ChargingRateUnitEnumType.amps,
-                            charging_schedule_period=[
-                                ChargingSchedulePeriodType(
-                                    start_period=0, limit=float(max_current)
-                                )
-                            ],
-                        )
-
-                        profile = ChargingProfileType(
-                            id=999,
+                        # TxDefaultProfile only (never a transaction-bound TxProfile).
+                        # See _run_limit_sequence for why: a TxProfile gets stuck to
+                        # a faulted transaction and orphans mid-session control.
+                        ok = await self._send_charging_profile(
+                            float(max_current),
+                            purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                            profile_id=998,
                             stack_level=0,
-                            charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
-                            charging_profile_kind=ChargingProfileKindEnumType.absolute,
-                            transaction_id=tx_id,
-                            charging_schedule=[schedule],
-                        )
-
-                        profile_response = await self._ocpp_call(
-                            call.SetChargingProfile(evse_id=1, charging_profile=profile)
                         )
                         _LOGGER.info(
-                            "SetChargingProfile response: %s", profile_response.status
+                            "SetChargingProfile(TxDefault %dA) accepted=%s",
+                            max_current,
+                            ok,
                         )
 
                         # Wait for charging to ramp up and request meter values
@@ -1164,61 +1282,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
         return await self.async_start_charging(status_callback)
 
-    async def async_refresh_transaction_id(self) -> str | None:
-        """Query the wallbox to get/verify the current transaction ID.
-
-        Uses GetTransactionStatus to verify the transaction is still active.
-        Returns the transaction_id if valid, None otherwise.
-        """
-        if not self.charge_point:
-            _LOGGER.warning("Cannot refresh transaction ID - no wallbox connected")
-            return None
-
-        if not self.current_transaction_id:
-            _LOGGER.debug("No transaction ID to refresh")
-            return None
-
-        _LOGGER.info(
-            "🔄 Refreshing transaction status for: %s", self.current_transaction_id
-        )
-
-        try:
-            response = await self._ocpp_call(
-                call.GetTransactionStatus(transaction_id=self.current_transaction_id)
-            )
-
-            _LOGGER.info(
-                "GetTransactionStatus response: ongoing=%s, messages_in_queue=%s",
-                response.ongoing_indicator
-                if hasattr(response, "ongoing_indicator")
-                else "N/A",
-                response.messages_in_queue
-                if hasattr(response, "messages_in_queue")
-                else "N/A",
-            )
-
-            # If transaction is ongoing, the ID is valid
-            if hasattr(response, "ongoing_indicator") and response.ongoing_indicator:
-                _LOGGER.info(
-                    "✅ Transaction %s is still active", self.current_transaction_id
-                )
-                return self.current_transaction_id
-            _LOGGER.warning(
-                "⚠️ Transaction %s may have ended (ongoing=%s)",
-                self.current_transaction_id,
-                getattr(response, "ongoing_indicator", None),
-            )
-            # Transaction might have ended - clear it
-            # But don't clear yet, let the caller decide
-            return self.current_transaction_id
-
-        except TimeoutError:
-            _LOGGER.warning("GetTransactionStatus timed out")
-            return self.current_transaction_id  # Return existing ID, let command try
-        except Exception as err:
-            _LOGGER.warning("GetTransactionStatus failed: %s", err)
-            return self.current_transaction_id  # Return existing ID, let command try
-
     async def async_pause_charging(self, allow_nuke: bool = True) -> dict:
         """Pause charging via SetChargingProfile(0A) - EVCC-style.
 
@@ -1236,9 +1299,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             result["message"] = "Wallbox not connected"
             # Can't nuke if not connected
             return result
-
-        # Refresh transaction ID from wallbox before attempting pause
-        await self.async_refresh_transaction_id()
 
         if not self.current_transaction_id:
             result["message"] = "No active charging session"
@@ -1284,13 +1344,14 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 ],
             )
 
-            # Use stackLevel=0 for highest priority (same as resume)
+            # TxDefaultProfile only (never a transaction-bound TxProfile): a
+            # TxProfile gets stuck to a faulted transaction and orphans control.
+            # See _run_limit_sequence.
             profile = ChargingProfileType(
-                id=999,
+                id=998,
                 stack_level=0,
-                charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
+                charging_profile_purpose=ChargingProfilePurposeEnumType.tx_default_profile,
                 charging_profile_kind=ChargingProfileKindEnumType.absolute,
-                transaction_id=self.current_transaction_id,
                 charging_schedule=[schedule],
             )
 
@@ -1406,9 +1467,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             result["message"] = "Wallbox not connected"
             return result
 
-        # Refresh transaction ID from wallbox before attempting resume
-        await self.async_refresh_transaction_id()
-
         if not self.current_transaction_id:
             result["message"] = "No active session - try starting first"
             return result
@@ -1427,61 +1485,18 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
 
-            start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            schedule = ChargingScheduleType(
-                id=1,
-                start_schedule=start_time,
-                charging_rate_unit=ChargingRateUnitEnumType.amps,
-                charging_schedule_period=[
-                    ChargingSchedulePeriodType(
-                        start_period=0, limit=float(current_limit)
-                    )
-                ],
-            )
-
-            # Use stackLevel=0 for highest priority
-            profile = ChargingProfileType(
-                id=999,
+            # TxDefaultProfile only (never a transaction-bound TxProfile): a
+            # TxProfile gets stuck to a faulted transaction and orphans control.
+            # See _run_limit_sequence.
+            ok = await self._send_charging_profile(
+                float(current_limit),
+                purpose=ChargingProfilePurposeEnumType.tx_default_profile,
+                profile_id=998,
                 stack_level=0,
-                charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
-                charging_profile_kind=ChargingProfileKindEnumType.absolute,
-                transaction_id=self.current_transaction_id,
-                charging_schedule=[schedule],
             )
+            _LOGGER.info("Resume (TxDefault %sA) accepted=%s", current_limit, ok)
 
-            response = await self._ocpp_call(
-                call.SetChargingProfile(evse_id=1, charging_profile=profile)
-            )
-
-            _LOGGER.info("Resume response: %s", response.status)
-
-            # Log additional status info if available
-            if hasattr(response, "status_info") and response.status_info:
-                _LOGGER.info(
-                    "Resume status_info: reason=%s, additional=%s",
-                    response.status_info.get("reason_code", "N/A"),
-                    response.status_info.get("additional_info", "N/A"),
-                )
-
-            # The clear-all above also wiped the persistent TxDefaultProfile.
-            # Reinstall it: the Delta firmware accepts a TxProfile sent while
-            # the transaction is suspended but silently discards it, so without
-            # this safety net the session resumes at the hardware maximum until
-            # the next limit change (issue #19).
-            try:
-                await self._send_charging_profile(
-                    float(current_limit),
-                    purpose=ChargingProfilePurposeEnumType.tx_default_profile,
-                    profile_id=998,
-                    stack_level=0,
-                )
-            except Exception as err:
-                _LOGGER.warning(
-                    "Could not reinstall TxDefaultProfile after resume: %s", err
-                )
-
-            if response.status == "Accepted":
+            if ok:
                 result["success"] = True
                 result["message"] = f"Charging resumed at {current_limit}A"
 
@@ -1492,10 +1507,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
                 asyncio.create_task(delayed_refresh())
             else:
-                reason = ""
-                if hasattr(response, "status_info") and response.status_info:
-                    reason = f" ({response.status_info.get('reason_code', '')})"
-                result["message"] = f"Resume rejected: {response.status}{reason}"
+                result["message"] = "Resume rejected: TxDefaultProfile not accepted"
 
             return result
 
@@ -1652,99 +1664,44 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             return await self._run_limit_sequence(limit)
 
     async def _run_limit_sequence(self, limit: float) -> bool:
-        """Clear existing profiles and install the new limit."""
-        # Re-read the transaction id from the wallbox first. A TxProfile is bound
-        # to a specific transaction, so a stale id makes the box reject the only
-        # profile that can limit the session in progress. The id goes stale
-        # easily: pause/resume keep the transaction alive on purpose, and the box
-        # does not always announce a new one with a TransactionEvent(Started) —
-        # on 2026-08-15 sensor.transaction_id held the same value across a
-        # Paused -> Car Paused -> Charging cycle while a new session ran.
-        # The pause and resume paths already refresh before acting; the limit
-        # path did not, which is why it was the one that failed.
-        await self.async_refresh_transaction_id()
+        """Install the current limit as a TxDefaultProfile only (no TxProfile).
 
-        _LOGGER.info(
-            "⚡ Setting current limit to %sA (tx=%s)",
-            limit,
-            self.current_transaction_id,
-        )
+        Why not a transaction-bound TxProfile: the Delta Gen 4 firmware leaves an
+        installed TxProfile in place after a SuspendedEVSE/fault event and then
+        refuses to clear or replace it — ClearChargingProfile returns "Unknown"
+        (by id AND by criteria) and a duplicate SetChargingProfile is "Rejected".
+        The transaction becomes "orphaned": every subsequent mid-session limit
+        change is silently rejected until the wallbox is rebooted. Measured live
+        2026-08-29 at 53% SoC: GetChargingProfiles showed a stuck id=999 27 A
+        TxProfile bound to the running transaction; the car drew 23.8 A while
+        every 8/10/27 A change was Rejected. The whole #14/#18/#24 TxProfile
+        machinery is what created the profile that gets stuck.
+
+        A TxDefaultProfile is not bound to a transaction, so nothing can pin
+        itself to a dead/faulted transaction. This Delta accepts and (per the
+        composite schedule) applies it, and it is the approach EVCC uses across
+        many wallboxes. We therefore install ONLY a TxDefaultProfile and never a
+        TxProfile — no transaction id is needed or sent.
+        """
+        _LOGGER.info("⚡ Setting current limit to %sA (TxDefaultProfile)", limit)
 
         try:
-            # The Delta firmware does NOT replace an existing profile with the
-            # same id/stack - it rejects the duplicate. After any start/resume
-            # (which installs TxProfile id=999) every mid-session limit change
-            # was therefore Rejected (issue #14 retest, seen live). Clear first,
-            # exactly like the proven pause/resume paths do, then reinstall.
-            if self.current_transaction_id:
-                try:
-                    clear_response = await self._ocpp_call(call.ClearChargingProfile())
-                    _LOGGER.debug(
-                        "ClearChargingProfile before limit change: %s",
-                        clear_response.status,
-                    )
-                except Exception as e:
-                    _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
-
-            # TxProfile takes effect immediately on the running session.
-            # stack_level 0 matches the pause/resume paths; some Delta firmware
-            # rejects any higher level (ChargingProfileMaxStackLevel=0), and
-            # TxProfile already outranks TxDefaultProfile by purpose alone.
-            ok_tx = False
-            if self.current_transaction_id:
-                ok_tx = await self._send_charging_profile(
-                    limit,
-                    purpose=ChargingProfilePurposeEnumType.tx_profile,
-                    profile_id=999,
-                    stack_level=0,
-                    transaction_id=self.current_transaction_id,
-                )
-
-            # TxDefaultProfile persists across sessions and applies from the
-            # start of the next transaction - prevents the startup overshoot.
-            # Sent after the TxProfile so the running session is limited first.
-            ok_default = await self._send_charging_profile(
+            ok = await self._send_charging_profile(
                 limit,
                 purpose=ChargingProfilePurposeEnumType.tx_default_profile,
                 profile_id=998,
                 stack_level=0,
             )
-
-            # A TxDefaultProfile applies from the START of the next transaction
-            # (OCPP 2.0.1). It does NOT touch a session that is already running.
-            # So while a transaction is live, ok_tx is the ONLY evidence that the
-            # car is actually limited; ok_default alone means "the next session
-            # will be limited" and nothing more.
-            #
-            # This used to be `if ok_default or ok_tx`, written for the opposite
-            # case (Delta Gen 4 rejecting the persistent TxDefaultProfile while
-            # honouring the per-session TxProfile, issue #14). The reverse
-            # combination silently reported success: on 2026-08-15 13:00:53 a
-            # 6 A limit was "applied" while the car kept drawing 21.4 A for
-            # 14 minutes, putting the grid at 34.6 A on a 30 A contract. Home
-            # Assistant believed the entity, so every load-management guard was
-            # blinded — the emergency branch requires `limit > 6` and the limit
-            # "was" 6. Reporting failure is what lets the caller react.
-            if self.current_transaction_id and not ok_tx:
-                _LOGGER.error(
-                    "❌ Current limit %sA NOT applied to the running session: "
-                    "TxProfile rejected (tx=%s). TxDefaultProfile accepted=%s, "
-                    "which only affects the NEXT session - the car is still on "
-                    "its previous limit",
-                    limit,
-                    self.current_transaction_id,
-                    ok_default,
-                )
-                return False
-
-            if ok_default or ok_tx:
+            if ok:
                 # Track the new limit for future start/resume/connect operations
                 self.data["current_limit"] = limit
                 self.async_set_updated_data(self.data)
                 return True
 
-            _LOGGER.warning(
-                "⚠️ Current limit %sA not applied (no profile accepted)", limit
+            # Report failure loudly: the caller (load management) must know the
+            # limit did not take, or it will trust a limit the car is not on.
+            _LOGGER.error(
+                "❌ Current limit %sA not applied: TxDefaultProfile rejected", limit
             )
             return False
 
@@ -1839,6 +1796,68 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to trigger meter values: %s", err, exc_info=True)
             return False
 
+    async def async_get_composite_schedule(self) -> float | None:
+        """Ask the wallbox what current limit it is ACTUALLY enforcing.
+
+        The ``number`` entity shows what HA *asked* for; it lies when the wallbox
+        did not apply it. GetCompositeSchedule returns the box's own computed
+        schedule, so we expose the truth (issue #25). Stores the first-period
+        limit in ``data['enforced_limit_a']`` and returns it.
+        """
+        if not self.charge_point:
+            return None
+        try:
+            from ocpp.v201 import call as ocpp_call
+            from ocpp.v201.enums import ChargingRateUnitEnumType
+
+            response = await self._ocpp_call(
+                ocpp_call.GetCompositeSchedule(
+                    duration=300,
+                    evse_id=1,
+                    charging_rate_unit=ChargingRateUnitEnumType.amps,
+                )
+            )
+            schedule = getattr(response, "schedule", None)
+            if not schedule:
+                return None
+            periods = schedule.get("charging_schedule_period") or []
+            if not periods:
+                return None
+            limit = periods[0].get("limit")
+            self.data["enforced_limit_a"] = limit
+            self.async_set_updated_data(self.data)
+            return limit
+        except Exception as err:  # best-effort diagnostic poll
+            _LOGGER.debug("GetCompositeSchedule failed (OK to ignore): %s", err)
+            return None
+
+    async def async_get_charging_profiles(self) -> bool:
+        """Ask the wallbox which charging profiles it has installed.
+
+        The reply arrives asynchronously as ReportChargingProfiles (see
+        ``on_report_charging_profiles``), which stores them and flags a stuck
+        transaction-bound TxProfile. Used on connect for diagnostics (issue #25).
+        """
+        if not self.charge_point:
+            return False
+        try:
+            from ocpp.v201 import call as ocpp_call
+            from ocpp.v201.datatypes import ChargingProfileCriterionType
+
+            # Reset the accumulator so a fresh report is not merged with a stale one.
+            self.data["installed_profiles"] = []
+            response = await self._ocpp_call(
+                ocpp_call.GetChargingProfiles(
+                    request_id=1,
+                    charging_profile=ChargingProfileCriterionType(),
+                    evse_id=1,
+                )
+            )
+            return getattr(response, "status", None) == "Accepted"
+        except Exception as err:  # best-effort diagnostic
+            _LOGGER.debug("GetChargingProfiles failed (OK to ignore): %s", err)
+            return False
+
     async def async_set_led_brightness(self, brightness: int) -> bool:
         """Set LED brightness via SetVariables (0-100%).
 
@@ -1857,8 +1876,8 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             set_var = SetVariableDataType(
                 attribute_type=AttributeEnumType.actual,
                 attribute_value=str(brightness),
-                component=ComponentType(name="ChargingStation"),
-                variable=VariableType(name="StatusLedBrightness"),
+                component=ComponentType(name="StatusLED"),
+                variable=VariableType(name="brightness"),
             )
 
             response = await self._ocpp_call(

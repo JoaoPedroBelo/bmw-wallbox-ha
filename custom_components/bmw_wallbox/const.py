@@ -53,6 +53,7 @@ SENSOR_ENERGY_REACTIVE_EXPORT: Final = "energy_reactive_export"
 
 BINARY_SENSOR_CHARGING: Final = "charging"
 BINARY_SENSOR_CONNECTED: Final = "connected"
+BINARY_SENSOR_FAULT: Final = "fault"
 BINARY_SENSOR_CAR_CONNECTED: Final = "car_connected"
 BINARY_SENSOR_AVAILABLE: Final = "available"
 
