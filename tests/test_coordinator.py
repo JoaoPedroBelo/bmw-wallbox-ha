@@ -501,32 +501,16 @@ async def test_async_pause_charging_nuke_on_rejection(coordinator):
     """Test pause triggers NUKE (reboot) when SetChargingProfile is rejected."""
     mock_charge_point = MagicMock()
 
-    # First call: TriggerMessage (meter refresh before pause check)
-    # Second call: GetTransactionStatus (refresh)
-    # Third call: ClearChargingProfile
-    # Fourth call: SetChargingProfile (rejected)
-    # Fifth call: Reset (NUKE)
-    call_count = 0
-
     async def mock_call(request):
-        nonlocal call_count
-        call_count += 1
-
-        if call_count <= 3:
-            # TriggerMessage, GetTransactionStatus, and ClearChargingProfile
-            mock_resp = MagicMock()
-            mock_resp.ongoing_indicator = True
-            mock_resp.status = "Accepted"
-            return mock_resp
-        if call_count == 4:
-            # SetChargingProfile - REJECTED!
-            mock_resp = MagicMock()
+        # The 0 A pause SetChargingProfile is rejected; everything else (the
+        # Reset nuke) is accepted. Keyed by message type so it is resilient to
+        # the exact call sequence.
+        mock_resp = MagicMock()
+        if type(request).__name__ == "SetChargingProfile":
             mock_resp.status = "Rejected"
             mock_resp.status_info = None
-            return mock_resp
-        # Reset - accepted
-        mock_resp = MagicMock()
-        mock_resp.status = "Accepted"
+        else:
+            mock_resp.status = "Accepted"
         return mock_resp
 
     mock_charge_point.call = mock_call
@@ -545,22 +529,17 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
     """Test pause does NOT trigger NUKE when allow_nuke=False."""
     mock_charge_point = MagicMock()
 
-    call_count = 0
+    reset_calls = []
 
     async def mock_call(request):
-        nonlocal call_count
-        call_count += 1
-
-        if call_count <= 3:
-            # TriggerMessage, GetTransactionStatus, ClearChargingProfile
-            mock_resp = MagicMock()
-            mock_resp.ongoing_indicator = True
-            mock_resp.status = "Accepted"
-            return mock_resp
-        # SetChargingProfile - REJECTED!
+        if type(request).__name__ == "Reset":
+            reset_calls.append(request)
         mock_resp = MagicMock()
-        mock_resp.status = "Rejected"
-        mock_resp.status_info = None
+        if type(request).__name__ == "SetChargingProfile":
+            mock_resp.status = "Rejected"
+            mock_resp.status_info = None
+        else:
+            mock_resp.status = "Accepted"
         return mock_resp
 
     mock_charge_point.call = mock_call
@@ -572,30 +551,18 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
 
     assert result["success"] is False
     assert "rejected" in result["message"].lower()
-    # Should NOT have called Reset (only 4 calls: trigger + tx_status + clear + set)
-    assert call_count == 4
+    # Must NOT reboot when allow_nuke=False.
+    assert reset_calls == []
 
 
 async def test_async_pause_charging_nuke_on_timeout(coordinator):
     """Test pause triggers NUKE when command times out."""
     mock_charge_point = MagicMock()
 
-    call_count = 0
-
     async def mock_call(request):
-        nonlocal call_count
-        call_count += 1
-
-        if call_count <= 3:
-            # TriggerMessage, GetTransactionStatus, ClearChargingProfile
-            mock_resp = MagicMock()
-            mock_resp.ongoing_indicator = True
-            mock_resp.status = "Accepted"
-            return mock_resp
-        if call_count == 4:
-            # SetChargingProfile - TIMEOUT!
+        if type(request).__name__ == "SetChargingProfile":
+            # The 0 A pause SetChargingProfile times out.
             raise TimeoutError("Connection timed out")
-        # Reset - accepted
         mock_resp = MagicMock()
         mock_resp.status = "Accepted"
         return mock_resp
@@ -932,13 +899,13 @@ def _profile_purposes(mock_call):
     ]
 
 
-async def test_set_current_limit_clears_profiles_first_with_transaction(coordinator):
-    """Mid-session limit changes must clear existing profiles first (issue #14).
+async def test_set_current_limit_sends_only_txdefault_no_clear_no_refresh(coordinator):
+    """A limit change sends ONE TxDefaultProfile - never a TxProfile (issue #25).
 
-    The Delta firmware does not replace a profile with the same id/stack - it
-    rejects the duplicate. After a start/resume installed TxProfile id=999,
-    every slider change was Rejected until profiles were cleared first (the
-    pause/resume paths already do this and are accepted).
+    A transaction-bound TxProfile gets stuck to a faulted transaction on the
+    Delta firmware and orphans mid-session control (ClearChargingProfile returns
+    "Unknown", a duplicate is Rejected). We install only a TxDefaultProfile, so
+    there is no GetTransactionStatus refresh and no ClearChargingProfile first.
     """
     mock_cp = MagicMock()
     mock_response = MagicMock()
@@ -950,15 +917,11 @@ async def test_set_current_limit_clears_profiles_first_with_transaction(coordina
     assert await coordinator.async_set_current_limit(13.0) is True
 
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
-    # The sequence now re-reads the transaction id first: a TxProfile is bound to
-    # a transaction, and a stale id makes the box reject the only profile that
-    # can limit the session in progress.
-    assert sent[0] == "GetTransactionStatus"
-    assert sent[1] == "ClearChargingProfile"
-    # TxProfile (immediate) before TxDefaultProfile (next-session persistence)
-    purposes = _profile_purposes(mock_cp.call)
-    assert purposes == [
-        ChargingProfilePurposeEnumType.tx_profile,
+    assert "GetTransactionStatus" not in sent
+    assert "ClearChargingProfile" not in sent
+    assert sent == ["SetChargingProfile"]
+    # A single TxDefaultProfile, never a transaction-bound TxProfile.
+    assert _profile_purposes(mock_cp.call) == [
         ChargingProfilePurposeEnumType.tx_default_profile,
     ]
 
@@ -1002,10 +965,8 @@ async def test_set_current_limit_survives_cancellation(coordinator):
             await asyncio.sleep(0)
 
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
-    assert sent[0] == "GetTransactionStatus"
-    assert sent[1] == "ClearChargingProfile"
+    assert sent == ["SetChargingProfile"]
     assert _profile_purposes(mock_cp.call) == [
-        ChargingProfilePurposeEnumType.tx_profile,
         ChargingProfilePurposeEnumType.tx_default_profile,
     ]
 
@@ -1047,21 +1008,12 @@ async def test_set_current_limit_sequences_do_not_interleave(coordinator):
 
     # Old sequence ran to completion first, then the new one - no interleaving.
     sent = [type(c.args[0]).__name__ for c in mock_cp.call.call_args_list]
-    assert sent == [
-        "GetTransactionStatus",
-        "ClearChargingProfile",
-        "SetChargingProfile",
-        "SetChargingProfile",
-        "GetTransactionStatus",
-        "ClearChargingProfile",
-        "SetChargingProfile",
-        "SetChargingProfile",
-    ]
+    assert sent == ["SetChargingProfile", "SetChargingProfile"]
     limits = [
         msg.charging_profile.charging_schedule[0].charging_schedule_period[0].limit
         for msg in _set_profile_messages(mock_cp.call)
     ]
-    assert limits == [15.0, 15.0, 19.0, 19.0]
+    assert limits == [15.0, 19.0]
     assert coordinator.data["current_limit"] == 19.0
 
 
@@ -1081,12 +1033,10 @@ async def test_set_current_limit_no_clear_without_transaction(coordinator):
 
 
 async def test_set_current_limit_profiles_use_stack_level_zero(coordinator):
-    """Every profile the slider sends must use stack_level=0 (issue #14 retest).
+    """The single TxDefaultProfile the slider sends uses stack_level=0.
 
     Delta firmware with ChargingProfileMaxStackLevel=0 rejects any profile at a
-    higher stack level, so a TxProfile at stack 1 was accepted-by-tests but
-    Rejected by the real wallbox and the limit never applied mid-session.
-    TxProfile already outranks TxDefaultProfile by purpose alone.
+    higher stack level.
     """
     mock_cp = MagicMock()
     mock_response = MagicMock()
@@ -1100,11 +1050,11 @@ async def test_set_current_limit_profiles_use_stack_level_zero(coordinator):
     stack_levels = [
         msg.charging_profile.stack_level for msg in _set_profile_messages(mock_cp.call)
     ]
-    assert stack_levels == [0, 0]
+    assert stack_levels == [0]
 
 
 async def test_set_current_limit_sends_tx_default_profile(coordinator):
-    """During a session both TxDefaultProfile and TxProfile are sent (issue #15)."""
+    """During a session ONLY a TxDefaultProfile is sent - never a TxProfile."""
     mock_cp = MagicMock()
     mock_response = MagicMock()
     mock_response.status = "Accepted"
@@ -1116,8 +1066,8 @@ async def test_set_current_limit_sends_tx_default_profile(coordinator):
 
     assert result is True
     purposes = _profile_purposes(mock_cp.call)
-    assert ChargingProfilePurposeEnumType.tx_default_profile in purposes
-    assert ChargingProfilePurposeEnumType.tx_profile in purposes
+    assert purposes == [ChargingProfilePurposeEnumType.tx_default_profile]
+    assert ChargingProfilePurposeEnumType.tx_profile not in purposes
     assert coordinator.data["current_limit"] == 13.0
 
 
@@ -1183,16 +1133,15 @@ async def test_resume_reinstalls_tx_default_profile(coordinator):
         result = await coordinator.async_resume_charging()
 
     assert result["success"] is True
+    # Resume installs ONLY a TxDefaultProfile - never a transaction-bound
+    # TxProfile that could get stuck and orphan the session (issue #25).
     purposes = _profile_purposes(mock_cp.call)
-    assert purposes == [
-        ChargingProfilePurposeEnumType.tx_profile,
-        ChargingProfilePurposeEnumType.tx_default_profile,
-    ]
+    assert purposes == [ChargingProfilePurposeEnumType.tx_default_profile]
     limits = [
         msg.charging_profile.charging_schedule[0].charging_schedule_period[0].limit
         for msg in _set_profile_messages(mock_cp.call)
     ]
-    assert limits == [6.0, 6.0]
+    assert limits == [6.0]
 
 
 async def test_apply_limit_on_charging_resumed(coordinator):
@@ -1419,38 +1368,43 @@ def _profile_response(accepted_purposes):
     return call
 
 
-async def test_limit_fails_when_tx_profile_rejected_during_session(coordinator):
-    """Session live + TxProfile rejected => failure, even if default accepted."""
+async def test_limit_fails_when_txdefault_rejected(coordinator):
+    """TxDefaultProfile rejected => failure; the entity must not claim success."""
     mock_cp = MagicMock()
     mock_cp.call = AsyncMock(
-        side_effect=_profile_response(
-            {ChargingProfilePurposeEnumType.tx_default_profile}
-        )
+        side_effect=_profile_response(set())  # reject everything
     )
     coordinator.charge_point = mock_cp
     coordinator.current_transaction_id = "tx-123"
-    coordinator.async_refresh_transaction_id = AsyncMock()
 
     assert await coordinator.async_set_current_limit(6.0) is False
     # The entity must NOT claim the car is limited when it is not.
     assert coordinator.data.get("current_limit") != 6.0
 
 
-async def test_limit_succeeds_when_tx_profile_accepted_and_default_rejected(
-    coordinator,
-):
-    """The original issue #14 case still passes: only the TxProfile matters."""
+async def test_limit_never_sends_tx_profile_during_session(coordinator):
+    """Regression guard: a live session must never install a TxProfile.
+
+    A transaction-bound TxProfile is what got stuck to a faulted transaction and
+    orphaned mid-session control on the Delta firmware (issue #25).
+    """
     mock_cp = MagicMock()
-    mock_cp.call = AsyncMock(
-        side_effect=_profile_response({ChargingProfilePurposeEnumType.tx_profile})
-    )
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
     coordinator.charge_point = mock_cp
     coordinator.current_transaction_id = "tx-123"
-    coordinator.async_refresh_transaction_id = AsyncMock()
-    coordinator.async_set_updated_data = MagicMock()
 
     assert await coordinator.async_set_current_limit(6.0) is True
     assert coordinator.data["current_limit"] == 6.0
+    assert ChargingProfilePurposeEnumType.tx_profile not in _profile_purposes(
+        mock_cp.call
+    )
+    # And no profile carries a transactionId.
+    assert all(
+        getattr(msg.charging_profile, "transaction_id", None) is None
+        for msg in _set_profile_messages(mock_cp.call)
+    )
 
 
 async def test_limit_succeeds_with_default_only_when_no_session(coordinator):
@@ -1463,24 +1417,97 @@ async def test_limit_succeeds_with_default_only_when_no_session(coordinator):
     )
     coordinator.charge_point = mock_cp
     coordinator.current_transaction_id = None
-    coordinator.async_refresh_transaction_id = AsyncMock()
     coordinator.async_set_updated_data = MagicMock()
 
     assert await coordinator.async_set_current_limit(16.0) is True
     assert coordinator.data["current_limit"] == 16.0
 
 
-async def test_limit_sequence_refreshes_transaction_id_first(coordinator):
-    """A stale transaction id is what made the box reject the TxProfile."""
+# ==============================================================================
+# ISSUE #25 - diagnostics: enforced-limit sensor, ReportChargingProfiles, faults
+# ==============================================================================
+
+
+async def test_report_charging_profiles_flags_stuck_txprofile(charge_point):
+    """A reported transaction-bound TxProfile must raise the stuck flag."""
+    await charge_point.on_report_charging_profiles(
+        request_id=1,
+        charging_limit_source="CSO",
+        charging_profile=[
+            {"id": 999, "chargingProfilePurpose": "TxProfile"},
+        ],
+        evse_id=1,
+    )
+    assert charge_point.coordinator.data["stuck_tx_profile"] is True
+    assert len(charge_point.coordinator.data["installed_profiles"]) == 1
+
+
+async def test_report_charging_profiles_no_stuck_for_txdefault(charge_point):
+    """A TxDefaultProfile is not transaction-bound - never flags stuck."""
+    await charge_point.on_report_charging_profiles(
+        request_id=1,
+        charging_limit_source="CSO",
+        charging_profile=[
+            {"id": 998, "chargingProfilePurpose": "TxDefaultProfile"},
+        ],
+        evse_id=1,
+    )
+    assert charge_point.coordinator.data["stuck_tx_profile"] is False
+
+
+async def test_status_notification_faulted_sets_fault(charge_point):
+    """A connector 'Faulted' surfaces as a fault state (issue #25)."""
+    await charge_point.on_status_notification(
+        timestamp=datetime.utcnow().isoformat(),
+        connector_status="Faulted",
+        evse_id=1,
+        connector_id=1,
+    )
+    assert charge_point.coordinator.data["wallbox_fault"] is True
+    assert charge_point.coordinator.data["last_fault"] == "Connector Faulted"
+    assert charge_point.coordinator.data.get("last_fault_time")
+
+    # And it clears when the connector goes back to a healthy state.
+    await charge_point.on_status_notification(
+        timestamp=datetime.utcnow().isoformat(),
+        connector_status="Occupied",
+        evse_id=1,
+        connector_id=1,
+    )
+    assert charge_point.coordinator.data["wallbox_fault"] is False
+
+
+async def test_get_composite_schedule_stores_enforced_limit(coordinator):
+    """GetCompositeSchedule's first-period limit lands in enforced_limit_a."""
     mock_cp = MagicMock()
-    mock_response = MagicMock()
-    mock_response.status = "Accepted"
-    mock_response.status_info = None
-    mock_cp.call = AsyncMock(return_value=mock_response)
+    response = MagicMock()
+    response.schedule = {"charging_schedule_period": [{"limit": 10.0}]}
+    mock_cp.call = AsyncMock(return_value=response)
     coordinator.charge_point = mock_cp
-    coordinator.current_transaction_id = "stale-tx"
-    coordinator.async_refresh_transaction_id = AsyncMock()
 
-    await coordinator.async_set_current_limit(16.0)
+    assert await coordinator.async_get_composite_schedule() == 10.0
+    assert coordinator.data["enforced_limit_a"] == 10.0
 
-    coordinator.async_refresh_transaction_id.assert_awaited_once()
+
+async def test_get_variable_reads_device_model_value(coordinator):
+    """async_get_variable returns the wallbox's configured value (feature #5)."""
+    mock_cp = MagicMock()
+    response = MagicMock()
+    response.get_variable_result = [
+        {"attribute_status": "Accepted", "attribute_value": "32"}
+    ]
+    mock_cp.call = AsyncMock(return_value=response)
+    coordinator.charge_point = mock_cp
+
+    assert await coordinator.async_get_variable("ChargingStation", "MaxCurrent") == "32"
+
+
+async def test_get_variable_returns_none_when_rejected(coordinator):
+    """A rejected GetVariables read yields None, not a bogus value."""
+    mock_cp = MagicMock()
+    response = MagicMock()
+    response.get_variable_result = [{"attribute_status": "Rejected"}]
+    mock_cp.call = AsyncMock(return_value=response)
+    coordinator.charge_point = mock_cp
+
+    assert await coordinator.async_get_variable("ChargingStation", "Nope") is None

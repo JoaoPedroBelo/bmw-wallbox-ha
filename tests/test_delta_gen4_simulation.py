@@ -100,7 +100,7 @@ class DeltaGen4Simulator:
 
     def _respond_set_profile(self, payload: dict) -> dict:
         profile = payload["chargingProfile"]
-        # Issue #14: one rejection poisons the whole transaction
+        # Issue #14: one TxProfile rejection poisons the whole transaction
         if self.poisoned:
             return {"status": "Rejected", "statusInfo": {"reasonCode": "TxPoisoned"}}
         # Issue #14: ChargingProfileMaxStackLevel=0
@@ -109,19 +109,26 @@ class DeltaGen4Simulator:
                 "status": "Rejected",
                 "statusInfo": {"reasonCode": "StackLevelOutOfRange"},
             }
-        # Issue #14: same-id profiles are not replaced - the duplicate is
-        # rejected and the transaction is poisoned from here on
-        if profile["id"] in self.stored_profile_ids:
-            self.poisoned = True
-            return {"status": "Rejected", "statusInfo": {"reasonCode": "DuplicateId"}}
 
         limit = profile["chargingSchedule"][0]["chargingSchedulePeriod"][0]["limit"]
         purpose = profile["chargingProfilePurpose"]
         if purpose == "TxDefaultProfile":
-            # Persistent config - stored regardless of charging state
+            # A TxDefaultProfile is replaced in place: the Delta accepts the same
+            # id again and updates the stored limit - no duplicate rejection, no
+            # poison (measured live 2026-08-29, 32A->10A->6A all Accepted). This
+            # is why the integration installs ONLY TxDefaultProfiles (issue #25).
             self.stored_default_limit = limit
             self.stored_profile_ids.add(profile["id"])
-        elif self.charging_state == "Charging":
+            return {"status": "Accepted"}
+
+        # Issue #14: a transaction-bound TxProfile with a duplicate id is NOT
+        # replaced - the duplicate is rejected and the transaction poisoned from
+        # here on. The integration no longer sends TxProfiles, so this is a
+        # regression guard: if any path regresses to a TxProfile it will trip.
+        if profile["id"] in self.stored_profile_ids:
+            self.poisoned = True
+            return {"status": "Rejected", "statusInfo": {"reasonCode": "DuplicateId"}}
+        if self.charging_state == "Charging":
             self.applied_tx_limit = limit
             self.stored_profile_ids.add(profile["id"])
         # else: the issue #19 quirk - "Accepted", then silently discarded
@@ -252,10 +259,10 @@ async def test_issue19_resume_keeps_configured_limit(sim_setup):
     # 1. Active session, charging
     await _start_session(sim, coordinator)
 
-    # 2. User limits the current to 6A - both profiles land on the wallbox
+    # 2. User limits the current to 6A - the TxDefaultProfile lands (no TxProfile)
     assert await coordinator.async_set_current_limit(6.0) is True
-    assert sim.applied_tx_limit == 6.0
     assert sim.stored_default_limit == 6.0
+    assert sim.drawn_current() == 6.0
 
     # 3. The EV suspends the session
     await sim.send_transaction_event("Updated", "SuspendedEVSE", seq_no=2)
@@ -266,17 +273,13 @@ async def test_issue19_resume_keeps_configured_limit(sim_setup):
     assert result["success"] is True
     assert result["action"] == "resumed"
 
-    # Fix layer 1: the TxDefaultProfile safety net survives the resume's
-    # clear-all, even though the firmware discarded the suspended TxProfile.
-    assert sim.applied_tx_limit is None  # quirk: accepted but discarded
+    # The TxDefaultProfile is not transaction-bound, so it is never discarded
+    # or poisoned: the configured limit holds across the whole cycle.
     assert sim.stored_default_limit == 6.0
 
     # 5. The wallbox actually resumes charging
     await sim.send_transaction_event("Updated", "Charging", seq_no=3)
-
-    # Fix layer 2: the Suspended->Charging transition re-pushes the limit,
-    # now in a state where the firmware honours the TxProfile.
-    await _wait_for(lambda: sim.applied_tx_limit == 6.0)
+    await _wait_for(lambda: coordinator.data.get("charging_state") == "Charging")
 
     # The issue #19 assertion: 6A, not the unrestricted hardware maximum.
     assert sim.drawn_current() == 6.0
@@ -325,7 +328,7 @@ async def test_issue14_notify_ev_charging_needs_answered_cleanly(sim_setup):
     # And the OCPP channel is still healthy: a limit change right after the
     # ISO 15118 negotiation must land normally.
     assert await coordinator.async_set_current_limit(10.0) is True
-    assert sim.applied_tx_limit == 10.0
+    assert sim.stored_default_limit == 10.0
 
 
 async def test_issue14_consecutive_limit_changes_never_poison(sim_setup):
@@ -343,13 +346,13 @@ async def test_issue14_consecutive_limit_changes_never_poison(sim_setup):
         assert await coordinator.async_set_current_limit(amps) is True, (
             f"limit change to {amps}A was rejected"
         )
-        assert sim.applied_tx_limit == amps
+        assert sim.stored_default_limit == amps
         assert sim.poisoned is False
 
     # Interleave the ISO 15118 message like the real Gen 4 does, then keep going
     await sim.send_notify_ev_charging_needs()
     assert await coordinator.async_set_current_limit(8.0) is True
-    assert sim.applied_tx_limit == 8.0
+    assert sim.stored_default_limit == 8.0
     assert sim.call_errors == []
 
 
@@ -385,7 +388,8 @@ async def test_issue14_pause_resume_cycle_survives_duplicate_quirk(sim_setup):
     assert result["action"] == "resumed"
 
     await sim.send_transaction_event("Updated", "Charging", seq_no=3)
-    await _wait_for(lambda: sim.applied_tx_limit == 6.0)
+    # Resume re-applies the tracked limit as a TxDefaultProfile.
+    await _wait_for(lambda: sim.stored_default_limit == 6.0)
     assert sim.drawn_current() == 6.0
     assert sim.poisoned is False
 

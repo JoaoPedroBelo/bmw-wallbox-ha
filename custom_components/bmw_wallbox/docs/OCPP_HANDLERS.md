@@ -548,29 +548,41 @@ if response.status == RequestStartStopStatusEnumType.accepted:
 
 ### SetChargingProfile
 
-**Purpose:** Control charging current. **REQUIRES active transaction.**
+**Purpose:** Control charging current. Install **only a `TxDefaultProfile`** —
+never a transaction-bound `TxProfile` (issue #25).
+
+**Why not `TxProfile`:** on the Delta Gen 4 firmware a `TxProfile` gets stuck to
+a transaction after a mid-session `SuspendedEVSE`/connector-`Faulted` event — the
+box then refuses to clear it (`ClearChargingProfile` returns `Unknown` by id and
+by criteria) or replace it (duplicate `SetChargingProfile` returns `Rejected`),
+so every later limit change is silently rejected until a reboot (measured live
+2026-08-29). A `TxDefaultProfile` is not bound to a transaction, is replaced in
+place by this firmware, and drives the composite schedule while no `TxProfile`
+overlays it — so it is the only profile the integration installs, everywhere
+(limit changes, session start, pause 0 A, resume). **No `transaction_id` is
+sent.** Fixed id `998`, `stack_level=0`.
 
 ```mermaid
 flowchart LR
     subgraph Profile["ChargingProfile"]
-        ID["id: 999"]
-        Stack["stack_level: 1"]
-        Purpose["purpose: TxProfile"]
+        ID["id: 998"]
+        Stack["stack_level: 0"]
+        Purpose["purpose: TxDefaultProfile"]
         Kind["kind: Absolute"]
-        TxId["transaction_id: REQUIRED!"]
-        
+
         subgraph Schedule["ChargingSchedule"]
             Start["start_schedule: now"]
             Unit["rate_unit: Amps"]
             Period["period: [{start: 0, limit: 32A}]"]
         end
     end
-    
+
     Profile --> WB[Wallbox]
     WB --> Resp["Response: Accepted/Rejected"]
 ```
 
-**Location:** `coordinator.py:624-648` (pause), `coordinator.py:698-722` (resume)
+**Location:** `coordinator.py` `_run_limit_sequence` (limit changes),
+`async_start_charging` / `async_pause_charging` / `async_resume_charging`.
 
 ```python
 from ocpp.v201.datatypes import (
@@ -584,42 +596,48 @@ from ocpp.v201.enums import (
     ChargingRateUnitEnumType,
 )
 
-# Create schedule
 schedule = ChargingScheduleType(
     id=1,
     start_schedule=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     charging_rate_unit=ChargingRateUnitEnumType.amps,
     charging_schedule_period=[
-        ChargingSchedulePeriodType(
-            start_period=0,
-            limit=32.0,  # Amps (0 = pause, 32 = full)
-        )
+        ChargingSchedulePeriodType(start_period=0, limit=32.0),  # 0 = pause
     ],
 )
 
-# Create profile
 profile = ChargingProfileType(
-    id=999,
-    stack_level=1,
-    charging_profile_purpose=ChargingProfilePurposeEnumType.tx_profile,
+    id=998,
+    stack_level=0,
+    charging_profile_purpose=ChargingProfilePurposeEnumType.tx_default_profile,
     charging_profile_kind=ChargingProfileKindEnumType.absolute,
     charging_schedule=[schedule],
-    transaction_id=self.current_transaction_id,  # REQUIRED!
+    # No transaction_id: a TxDefaultProfile is never transaction-bound.
 )
 
-response = await asyncio.wait_for(
-    self.charge_point.call(
-        call.SetChargingProfile(evse_id=1, charging_profile=profile)
-    ),
-    timeout=15.0,
+response = await self._ocpp_call(
+    call.SetChargingProfile(evse_id=1, charging_profile=profile)
 )
-
-if response.status == "Accepted":
-    # Profile applied
-    pass
 ```
 
-**Critical:** `transaction_id` is REQUIRED for `tx_profile` purpose.
+**Critical:** never regress to a `tx_profile`. `tests/test_coordinator.py`
+`test_limit_never_sends_tx_profile_during_session` guards this.
+
+### GetCompositeSchedule / GetChargingProfiles / ReportChargingProfiles
+
+- **`GetCompositeSchedule`** (`async_get_composite_schedule`) — reads the limit
+  the wallbox is *actually* enforcing into `data["enforced_limit_a"]`
+  (`sensor.enforced_current_limit`). The truth, vs the requested `number`.
+- **`GetChargingProfiles`** (`async_get_charging_profiles`, sent on connect) —
+  the reply arrives as **`ReportChargingProfiles`**, handled by
+  `on_report_charging_profiles`: it stores the installed profiles and sets
+  `data["stuck_tx_profile"]` when a lingering transaction-bound `TxProfile` is
+  found. Without this handler the ocpp library answered with a `CallError`.
+
+### GetVariables
+
+`async_get_variable(component, variable)` reads a device-model value (used on
+connect for the hardware `MaxCurrent` → `sensor.max_charging_current` and
+`StatusLedBrightness` → `number.led_brightness`).
 
 ---
 

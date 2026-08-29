@@ -11,7 +11,7 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent
+from homeassistant.const import EntityCategory, UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -33,6 +33,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             BMWWallboxCurrentLimitNumber(coordinator, entry),
+            BMWWallboxLedBrightnessNumber(coordinator, entry),
         ]
     )
 
@@ -62,10 +63,6 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{NUMBER_CURRENT_LIMIT}"
         self._attr_name = "Charging Current Limit"
-        self._attr_native_max_value = entry.options.get(
-            CONF_MAX_CURRENT,
-            entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
-        )
         # Device info for grouping
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["charge_point_id"])},
@@ -76,16 +73,26 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
             "serial_number": coordinator.device_info.get("serial_number"),
         }
 
+    def _configured_max(self) -> float:
+        """The 'Maximum Current (A)' from the config entry."""
+        return self._entry.options.get(
+            CONF_MAX_CURRENT,
+            self._entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+        )
+
+    @property
+    def native_max_value(self) -> float:
+        """Slider ceiling - the configured 'Maximum Current (A)'.
+
+        That option defaults from the wallbox-reported max in the options flow,
+        so the ceiling tracks the hardware limit while staying user-overridable.
+        """
+        return self._configured_max()
+
     @property
     def native_value(self) -> float:
         """Return current limit value."""
-        return self.coordinator.data.get(
-            "current_limit",
-            self._entry.options.get(
-                CONF_MAX_CURRENT,
-                self._entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
-            ),
-        )
+        return self.coordinator.data.get("current_limit", self._configured_max())
 
     async def async_set_native_value(self, value: float) -> None:
         """Set new current limit.
@@ -106,3 +113,50 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
                 _LOGGER.warning(
                     "Failed to send current limit to wallbox (will apply on next start)"
                 )
+
+
+class BMWWallboxLedBrightnessNumber(CoordinatorEntity, NumberEntity):
+    """LED brightness control (0-100%) via the OCPP device model (feature #5).
+
+    Reads StatusLedBrightness with GetVariables on connect and writes it with
+    the existing SetVariables path.
+    """
+
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.SLIDER
+    _attr_icon = "mdi:led-on"
+    _attr_native_unit_of_measurement = "%"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: BMWWallboxCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the LED brightness number."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_led_brightness"
+        self._attr_name = "LED Brightness"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.data["charge_point_id"])},
+            "name": "BMW Wallbox",
+            "manufacturer": coordinator.device_info.get("vendor", "BMW"),
+            "model": coordinator.device_info.get("model", "EIAW-E22KTSE6B04"),
+            "sw_version": coordinator.device_info.get("firmware_version"),
+            "serial_number": coordinator.device_info.get("serial_number"),
+        }
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the last known LED brightness (%)."""
+        return self.coordinator.data.get("led_brightness")
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the LED brightness on the wallbox."""
+        if await self.coordinator.async_set_led_brightness(int(value)):
+            self.coordinator.data["led_brightness"] = int(value)
+            self.coordinator.async_set_updated_data(self.coordinator.data)
+        else:
+            _LOGGER.warning("Failed to set LED brightness to %s%%", int(value))

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-29
+
+### Fixed
+
+- **Current-limit changes stopped applying mid-session until the wallbox was rebooted (the recurring "I raise the limit and the watts don't change" bug).** Root-caused live on the real Delta Gen 4 (firmware `01.20.06.71`) by capturing raw OCPP frames: the integration installed a transaction-bound `TxProfile` (id 999), and after a mid-session `SuspendedEVSE`/connector-`Faulted` event the Delta **refuses to clear or replace it** — `ClearChargingProfile` returns `Unknown` (by id AND by criteria) and a duplicate `SetChargingProfile` returns `Rejected`. The transaction becomes "orphaned" and every later limit change is silently rejected until a reboot forces a new transaction (`GetChargingProfiles` at 53% SoC showed a stuck id 999 27 A `TxProfile` while the car drew 23.8 A and every 8/10/27 A change was `Rejected`). The integration now installs **only a `TxDefaultProfile`** (no `transactionId`) across every path — limit changes, session start, pause (0 A) and resume — so nothing can pin itself to a faulted transaction. A `TxDefaultProfile` is replaced in place by this firmware (measured live 32→10→6 A all `Accepted`) and drives the composite schedule while no `TxProfile` overlays it, so mid-session control works without a reboot. This removes the `TxProfile`/refresh/clear machinery from [#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14)/[#18](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/18)/[#24](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/24) that created the profile that got stuck.
+
+### Added
+
+- **`sensor.enforced_current_limit`** — the current limit the wallbox is *actually* enforcing, read via `GetCompositeSchedule` each poll. Unlike `number.charging_current_limit` (what Home Assistant asked for), this shows the truth, so a rejected/ignored limit is visible instead of silent.
+- **`binary_sensor.fault`** — surfaces a connector `Faulted` (the trigger that orphaned the transaction) and NotifyEvent alerts as a first-class Home Assistant state, with the reason and timestamp as `last_fault`/`last_fault_time` attributes and a `stuck_tx_profile` flag when a leftover transaction-bound profile is detected. Home Assistant history/logbook gives the fault timeline. Entity only — no push notifications.
+- **`ReportChargingProfiles` handler** — previously the reply to `GetChargingProfiles` threw `NotImplementedError`; it is now parsed, storing the installed profiles for diagnostics and warning when a stuck `TxProfile` is present.
+- **`sensor.max_charging_current`** — the hardware max current configured on the wallbox, read via `GetVariables` (the real ceiling for load management).
+- **`number.led_brightness`** — read (`GetVariables`) and write (`SetVariables`) the wallbox LED brightness. Also corrects the LED variable, which used the wrong device-model path (`ChargingStation.StatusLedBrightness` → `UnknownVariable`); it is `StatusLED.brightness`, so LED control now actually takes effect.
+- **The "Maximum Current (A)" option is now bounded by the wallbox** — the config/options field is capped at the value the wallbox reports (`GetVariables` `MaxCurrent`, also `sensor.max_charging_current`) and defaults to it, so you can only pick a limit between the 6 A minimum and the real hardware maximum (a saved value still wins as the default). The `number.charging_current_limit` slider ceiling follows that option.
+
+### Removed
+
+- **Transaction-bound `TxProfile` charging profiles** are no longer sent by any code path — the integration is `TxDefaultProfile`-only. This is the breaking behavioural change that warrants the major version: the whole `TxProfile` + transaction-id-refresh + clear-before-set strategy from #14/#18/#24 is gone.
+- **`coordinator.async_refresh_transaction_id()`** (and its `GetTransactionStatus` call) — it only existed to validate a transaction id before building a `TxProfile`; with no `TxProfile`, nothing needs it. The `transaction_id` is still tracked as an "active session" signal and exposed as `sensor.transaction_id`.
+
 ## [1.7.6] - 2026-08-15
 
 ### Fixed

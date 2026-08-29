@@ -6,8 +6,10 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 import pytest
+import voluptuous as vol
 
 from custom_components.bmw_wallbox.config_flow import ConfigFlow, OptionsFlow
+from custom_components.bmw_wallbox.const import DOMAIN
 
 
 @pytest.fixture
@@ -206,3 +208,98 @@ async def test_options_flow_updates_values(hass: HomeAssistant) -> None:
     assert result["data"]["rfid_token"] == "NEWTOKEN456"
     assert result["data"]["max_current"] == 16
     assert result["data"]["scan_interval"] == 10
+
+
+async def test_options_flow_max_current_defaults_from_wallbox(
+    hass: HomeAssistant,
+) -> None:
+    """The 'Maximum Current (A)' field defaults to the wallbox-reported max."""
+    entry = MagicMock(spec_set=["data", "options", "entry_id"])
+    entry.entry_id = "test_entry"
+    entry.data = {
+        "charge_point_id": "DE*BMW*TEST123",
+        "rfid_token": "",
+        "max_current": 16,
+        "scan_interval": 30,
+    }
+    entry.options = {}
+
+    coordinator = MagicMock()
+    coordinator.data = {"max_current_a": 25}
+    hass.data[DOMAIN] = {"test_entry": coordinator}
+
+    flow = OptionsFlow()
+    _attach_config_entry(flow, entry)
+    flow.hass = hass
+
+    result = await flow.async_step_init()
+
+    schema = result["data_schema"]
+    max_current_default = next(
+        key.default() for key in schema.schema if str(key) == "max_current"
+    )
+    # Wallbox-reported 25 wins over the stored setup value of 16.
+    assert max_current_default == 25
+
+
+async def test_options_flow_saved_max_current_wins_over_wallbox(
+    hass: HomeAssistant,
+) -> None:
+    """A previously saved option takes precedence over the wallbox value."""
+    entry = MagicMock(spec_set=["data", "options", "entry_id"])
+    entry.entry_id = "test_entry"
+    entry.data = {
+        "charge_point_id": "DE*BMW*TEST123",
+        "rfid_token": "",
+        "max_current": 16,
+        "scan_interval": 30,
+    }
+    entry.options = {"max_current": 20}
+
+    coordinator = MagicMock()
+    coordinator.data = {"max_current_a": 25}
+    hass.data[DOMAIN] = {"test_entry": coordinator}
+
+    flow = OptionsFlow()
+    _attach_config_entry(flow, entry)
+    flow.hass = hass
+
+    result = await flow.async_step_init()
+
+    schema = result["data_schema"]
+    max_current_default = next(
+        key.default() for key in schema.schema if str(key) == "max_current"
+    )
+    # Saved option 20 wins over the wallbox-reported 25.
+    assert max_current_default == 20
+
+
+async def test_options_flow_max_current_capped_at_wallbox(
+    hass: HomeAssistant,
+) -> None:
+    """The 'Maximum Current (A)' field rejects values above the wallbox max."""
+    entry = MagicMock(spec_set=["data", "options", "entry_id"])
+    entry.entry_id = "test_entry"
+    entry.data = {
+        "charge_point_id": "DE*BMW*TEST123",
+        "rfid_token": "",
+        "max_current": 16,
+        "scan_interval": 30,
+    }
+    entry.options = {}
+
+    coordinator = MagicMock()
+    coordinator.data = {"max_current_a": 25}
+    hass.data[DOMAIN] = {"test_entry": coordinator}
+
+    flow = OptionsFlow()
+    _attach_config_entry(flow, entry)
+    flow.hass = hass
+
+    result = await flow.async_step_init()
+    schema = result["data_schema"]
+
+    # 25 (the reported max) is accepted; 26 is above the hardware ceiling.
+    assert schema({"rfid_token": "", "max_current": 25, "scan_interval": 30})
+    with pytest.raises(vol.Invalid):
+        schema({"rfid_token": "", "max_current": 26, "scan_interval": 30})
