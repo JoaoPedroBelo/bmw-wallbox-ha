@@ -7,23 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-08-29
 
+This is a major release. It replaces the charging-control strategy end to end to fix a
+long-standing bug where the wallbox stopped responding to current-limit changes until it
+was rebooted, and adds diagnostic and configuration entities that expose what the wallbox
+is actually doing. See **Migration** below for the one breaking change.
+
 ### Fixed
 
-- **Current-limit changes stopped applying mid-session until the wallbox was rebooted (the recurring "I raise the limit and the watts don't change" bug).** Root-caused live on the real Delta Gen 4 (firmware `01.20.06.71`) by capturing raw OCPP frames: the integration installed a transaction-bound `TxProfile` (id 999), and after a mid-session `SuspendedEVSE`/connector-`Faulted` event the Delta **refuses to clear or replace it** — `ClearChargingProfile` returns `Unknown` (by id AND by criteria) and a duplicate `SetChargingProfile` returns `Rejected`. The transaction becomes "orphaned" and every later limit change is silently rejected until a reboot forces a new transaction (`GetChargingProfiles` at 53% SoC showed a stuck id 999 27 A `TxProfile` while the car drew 23.8 A and every 8/10/27 A change was `Rejected`). The integration now installs **only a `TxDefaultProfile`** (no `transactionId`) across every path — limit changes, session start, pause (0 A) and resume — so nothing can pin itself to a faulted transaction. A `TxDefaultProfile` is replaced in place by this firmware (measured live 32→10→6 A all `Accepted`) and drives the composite schedule while no `TxProfile` overlays it, so mid-session control works without a reboot. This removes the `TxProfile`/refresh/clear machinery from [#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14)/[#18](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/18)/[#24](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/24) that created the profile that got stuck.
+- **Current-limit changes no longer stop applying mid-session (the recurring "I raise the
+  limit and the power doesn't change until I reboot" bug).**
+
+  - *Impact:* After a mid-session interruption, every current-limit change was silently
+    rejected by the wallbox. The `number.charging_current_limit` entity reported the new
+    value while the car kept drawing the old one, blinding any load-management automation
+    that trusted it. Only a reboot restored control.
+  - *Root cause:* The integration controlled charging with a transaction-bound
+    `TxProfile`. On the Delta Gen 4 (firmware `01.20.06.71`), once a `SuspendedEVSE` or
+    connector `Faulted` event occurs mid-session, that profile becomes locked to the now
+    "orphaned" transaction: `ClearChargingProfile` returns `Unknown` (by id and by
+    criteria) and any replacing `SetChargingProfile` returns `Rejected`. Diagnosed live
+    from raw OCPP frames — at 53% SoC a stuck 27 A `TxProfile` remained installed while
+    the car drew 23.8 A and every 8/10/27 A change was rejected.
+  - *Fix:* Charging is now controlled exclusively with a `TxDefaultProfile`, which is not
+    bound to any transaction and so cannot be orphaned. It is applied uniformly across
+    limit changes, session start, pause (0 A) and resume, and the firmware replaces it in
+    place (verified live: 32→10→6 A, all `Accepted`). This is the same approach used by
+    EVCC. Resolves [#14](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/14),
+    [#18](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/18) and
+    [#24](https://github.com/JoaoPedroBelo/bmw-wallbox-ha/issues/24).
+- **LED brightness control now takes effect.** It previously targeted the wrong device-model
+  variable (`ChargingStation.StatusLedBrightness`), which the wallbox answered with
+  `UnknownVariable`. It now uses the correct path, `StatusLED.brightness`.
 
 ### Added
 
-- **`sensor.enforced_current_limit`** — the current limit the wallbox is *actually* enforcing, read via `GetCompositeSchedule` each poll. Unlike `number.charging_current_limit` (what Home Assistant asked for), this shows the truth, so a rejected/ignored limit is visible instead of silent.
-- **`binary_sensor.fault`** — surfaces a connector `Faulted` (the trigger that orphaned the transaction) and NotifyEvent alerts as a first-class Home Assistant state, with the reason and timestamp as `last_fault`/`last_fault_time` attributes and a `stuck_tx_profile` flag when a leftover transaction-bound profile is detected. Home Assistant history/logbook gives the fault timeline. Entity only — no push notifications.
-- **`ReportChargingProfiles` handler** — previously the reply to `GetChargingProfiles` threw `NotImplementedError`; it is now parsed, storing the installed profiles for diagnostics and warning when a stuck `TxProfile` is present.
-- **`sensor.max_charging_current`** — the hardware max current configured on the wallbox, read via `GetVariables` (the real ceiling for load management).
-- **`number.led_brightness`** — read (`GetVariables`) and write (`SetVariables`) the wallbox LED brightness. Also corrects the LED variable, which used the wrong device-model path (`ChargingStation.StatusLedBrightness` → `UnknownVariable`); it is `StatusLED.brightness`, so LED control now actually takes effect.
-- **The "Maximum Current (A)" option is now bounded by the wallbox** — the config/options field is capped at the value the wallbox reports (`GetVariables` `MaxCurrent`, also `sensor.max_charging_current`) and defaults to it, so you can only pick a limit between the 6 A minimum and the real hardware maximum (a saved value still wins as the default). The `number.charging_current_limit` slider ceiling follows that option.
+- **`sensor.enforced_current_limit`** — the limit the wallbox is *actually* enforcing, read
+  from `GetCompositeSchedule` on every poll. Unlike `number.charging_current_limit` (the
+  requested value), this reflects reality, so a rejected or ignored limit is now visible.
+- **`binary_sensor.fault`** — surfaces connector `Faulted` states and `NotifyEvent` alerts
+  as a first-class Home Assistant entity, with the reason and time in the `last_fault` /
+  `last_fault_time` attributes and a `stuck_tx_profile` flag if a leftover transaction-bound
+  profile is ever detected. Diagnostics only — no push notifications; wire your own
+  automation on top if you want alerts.
+- **`sensor.max_charging_current`** — the hardware maximum current reported by the wallbox
+  (`GetVariables`), i.e. the true ceiling for load management.
+- **`number.led_brightness`** — read and write the wallbox LED brightness (0–100%) over the
+  OCPP device model.
+- **Wallbox-bounded "Maximum Current (A)" option** — the configuration field is now capped
+  at, and defaults to, the maximum the wallbox reports, so the configured limit can never
+  exceed the hardware. A previously saved value is preserved. The
+  `number.charging_current_limit` slider follows this ceiling.
+- **`ReportChargingProfiles` handler** — replies to `GetChargingProfiles` are now parsed
+  and stored for diagnostics (previously they raised `NotImplementedError`), including a
+  warning when a stuck `TxProfile` is present.
 
 ### Removed
 
-- **Transaction-bound `TxProfile` charging profiles** are no longer sent by any code path — the integration is `TxDefaultProfile`-only. This is the breaking behavioural change that warrants the major version: the whole `TxProfile` + transaction-id-refresh + clear-before-set strategy from #14/#18/#24 is gone.
-- **`coordinator.async_refresh_transaction_id()`** (and its `GetTransactionStatus` call) — it only existed to validate a transaction id before building a `TxProfile`; with no `TxProfile`, nothing needs it. The `transaction_id` is still tracked as an "active session" signal and exposed as `sensor.transaction_id`.
+- **Transaction-bound `TxProfile` charging profiles.** No code path sends them any more;
+  charging control is `TxDefaultProfile`-only. This removes the previous
+  `TxProfile` + transaction-id-refresh + clear-before-set strategy in its entirety.
+- **`coordinator.async_refresh_transaction_id()`** and its `GetTransactionStatus` call,
+  which only existed to validate a transaction id before building a `TxProfile`. The active
+  transaction is still tracked and exposed as `sensor.transaction_id`.
+
+### Migration
+
+No configuration changes are required. The removal of the public
+`coordinator.async_refresh_transaction_id()` method is the only breaking change; it affects
+custom scripts or forks that called it directly. All standard entities and services are
+unchanged.
 
 ## [1.7.6] - 2026-08-15
 
