@@ -251,8 +251,8 @@ async def test_issue19_resume_keeps_configured_limit(sim_setup):
     Pre-fix, the resume's clear-all wiped the TxDefaultProfile and the
     replacement TxProfile was discarded by the suspended firmware, so the
     wallbox resumed at HARDWARE_MAX_A. The fix reinstalls the TxDefaultProfile
-    during resume AND re-pushes both profiles once the state flips back to
-    Charging, so the drawn current must stay at the configured 6A.
+    during resume; it survives the flip back to Charging (no re-push there,
+    issue #14), so the drawn current must stay at the configured 6A.
     """
     sim, coordinator = sim_setup
 
@@ -388,7 +388,7 @@ async def test_issue14_pause_resume_cycle_survives_duplicate_quirk(sim_setup):
     assert result["action"] == "resumed"
 
     await sim.send_transaction_event("Updated", "Charging", seq_no=3)
-    # Resume re-applies the tracked limit as a TxDefaultProfile.
+    # The TxDefaultProfile installed by the resume still holds the limit.
     await _wait_for(lambda: sim.stored_default_limit == 6.0)
     assert sim.drawn_current() == 6.0
     assert sim.poisoned is False

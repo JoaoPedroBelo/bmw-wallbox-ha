@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **No `SetChargingProfile` is sent any more when charging resumes from a suspended
+  state.**
+
+  - *Why:* In both live captures of the "wallbox rejects every limit change until it is
+    rebooted" lockout (#14), the first rejected profile was this re-send, issued within
+    2-6 ms of the `SuspendedEV`/`SuspendedEVSE` → `Charging` transition. The re-send
+    existed for transaction-bound `TxProfile`s the firmware discarded while suspended
+    (#19); since 2.0.0 only a `TxDefaultProfile` is used, and it survives the
+    suspension, so the re-send was redundant.
+  - This removes the request sent at that moment. It is not yet proven to prevent the
+    lockout, which has not been reproduced on demand.
+
 ## [2.0.1] - 2026-11-19
 
 ### Fixed
