@@ -335,19 +335,13 @@ class WallboxChargePoint(cp):
                 self.coordinator.async_apply_limit_on_transaction_start()
             )
 
-        # When charging resumes from a suspended state, re-push the limit: the
-        # Delta firmware discards TxProfiles it accepted while suspended, so the
-        # session would otherwise draw the hardware maximum (issue #19).
-        previous_state = self.coordinator.data.get("charging_state")
-        new_state = transaction_info.get("charging_state")
-        if (
-            event_type == "Updated"
-            and new_state == "Charging"
-            and previous_state in ("SuspendedEV", "SuspendedEVSE")
-        ):
-            asyncio.create_task(
-                self.coordinator.async_apply_limit_on_charging_resumed()
-            )
+        # No SetChargingProfile when charging resumes from a suspended state.
+        # The old re-push existed for TxProfiles the firmware discarded while
+        # suspended (issue #19); since v2.0.0 only a TxDefaultProfile is used,
+        # and it survives the suspension. In both live captures of the
+        # "rejects every profile until reboot" lockout (#14), the first
+        # rejected SetChargingProfile was exactly this re-push, sent within a
+        # few ms of the SuspendedEV/SuspendedEVSE -> Charging transition.
 
         # Update coordinator data with basic transaction info
         self.coordinator.data.update(
@@ -1754,21 +1748,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         if not limit:
             return
         _LOGGER.info("🚀 Transaction started - applying %sA immediately", limit)
-        await self.async_set_current_limit(limit)
-
-    async def async_apply_limit_on_charging_resumed(self) -> None:
-        """Re-apply the configured limit when charging resumes (issue #19).
-
-        The Delta Gen 4 firmware returns Accepted for TxProfiles sent while the
-        transaction is SuspendedEV/SuspendedEVSE but silently discards them, so
-        once current actually starts flowing the session runs unrestricted.
-        Re-sending the profiles in the Charging state is the proven-working
-        path (issue #14 retest).
-        """
-        limit = self.data.get("current_limit")
-        if not limit:
-            return
-        _LOGGER.info("🔁 Charging resumed - re-applying %sA limit", limit)
         await self.async_set_current_limit(limit)
 
     async def _apply_default_limit_on_connect(self) -> None:
