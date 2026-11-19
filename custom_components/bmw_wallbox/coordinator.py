@@ -71,6 +71,38 @@ OCPP_RESPONSE_TIMEOUT = 20.0
 OCPP_CALL_BACKSTOP_TIMEOUT = 30.0
 
 
+def _ocpp_utc_now() -> str:
+    """Current UTC time as an OCPP dateTime (RFC 3339, 'Z' suffix, seconds).
+
+    The wallbox sets its clock from BootNotification/Heartbeat ``currentTime``.
+    ``datetime.utcnow().isoformat()`` has no timezone designator and carries
+    microseconds; the Delta Gen 4 cannot parse it and sets its clock to the
+    wrong second on every heartbeat (SecurityEventNotification
+    "SettingSystemTime ... HH:MM:10Z to HH:MM:SS.ffffff"), leaving it up to
+    ~60 s behind. Every SetChargingProfile then carries a startSchedule that
+    is in the wallbox's future, so the new limit only takes effect when its
+    clock catches up, and until then the station falls back to its install
+    maximum (composite schedule [{0: 25 A}, {41: 6 A}]).
+    """
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# How far in the past a charging profile's startSchedule is anchored.
+# The Delta Gen 4 clock runs behind the CSMS (measured ~54 s on 2026-11-19 and
+# not correctable: ClockCtrlr exposes no TimeSource/NTP variables). A profile
+# anchored at the CSMS "now" is in the wallbox's future, so the new limit only
+# starts when its clock catches up, and until then the station charges at its
+# install maximum - every limit change briefly overshoots to e.g. 25 A, which
+# defeats load management. Anchoring in the past makes the profile active the
+# moment it is accepted. The margin only has to exceed the clock offset.
+PROFILE_START_BACKDATE = timedelta(minutes=10)
+
+
+def _profile_start_schedule() -> str:
+    """startSchedule for an Absolute profile that is active immediately."""
+    return (datetime.now(UTC) - PROFILE_START_BACKDATE).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _compute_live_current(
     data: dict[str, Any],
     reported_total: float | None,
@@ -150,7 +182,7 @@ class WallboxChargePoint(cp):
         }
 
         return call_result.BootNotification(
-            current_time=datetime.utcnow().isoformat(),
+            current_time=_ocpp_utc_now(),
             interval=10,
             status=RegistrationStatusEnumType.accepted,
         )
@@ -271,7 +303,7 @@ class WallboxChargePoint(cp):
         self.coordinator.data["connected"] = True
         self.coordinator.data["last_heartbeat"] = datetime.utcnow()
 
-        return call_result.Heartbeat(current_time=datetime.utcnow().isoformat())
+        return call_result.Heartbeat(current_time=_ocpp_utc_now())
 
     @on("TransactionEvent")
     async def on_transaction_event(
@@ -1333,7 +1365,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.debug("ClearChargingProfile failed (OK to ignore): %s", e)
 
-            start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            start_time = _profile_start_schedule()
 
             schedule = ChargingScheduleType(
                 id=1,
@@ -1551,7 +1583,7 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         Shared by the TxDefaultProfile (applies from the start of every session,
         no transaction needed) and TxProfile (active session) code paths.
         """
-        start_time = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        start_time = _profile_start_schedule()
 
         schedule = ChargingScheduleType(
             id=1,

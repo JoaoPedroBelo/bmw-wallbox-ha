@@ -2,7 +2,7 @@
 
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import json
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +14,7 @@ import pytest
 from custom_components.bmw_wallbox.coordinator import (
     OCPP_CALL_BACKSTOP_TIMEOUT,
     OCPP_RESPONSE_TIMEOUT,
+    PROFILE_START_BACKDATE,
     BMWWallboxCoordinator,
     WallboxChargePoint,
     _compute_live_current,
@@ -133,6 +134,27 @@ async def test_heartbeat_handler(charge_point):
     assert charge_point.coordinator.data["connected"] is True
     assert charge_point.coordinator.data["last_heartbeat"] is not None
     assert response.current_time is not None
+
+
+# OCPP dateTime the wallbox can parse: UTC, 'Z' suffix, whole seconds.
+_OCPP_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+async def test_heartbeat_current_time_is_rfc3339_utc(charge_point):
+    """currentTime must carry a 'Z' and no microseconds (OCPP dateTime)."""
+    response = await charge_point.on_heartbeat()
+
+    parsed = datetime.strptime(response.current_time, _OCPP_DATETIME_FORMAT)
+    assert abs((datetime.now(UTC).replace(tzinfo=None) - parsed).total_seconds()) < 5
+
+
+async def test_boot_notification_current_time_is_rfc3339_utc(charge_point):
+    """BootNotification currentTime uses the same OCPP dateTime format."""
+    response = await charge_point.on_boot_notification(
+        charging_station={"model": "M", "vendor_name": "BMW"}, reason="PowerUp"
+    )
+
+    datetime.strptime(response.current_time, _OCPP_DATETIME_FORMAT)
 
 
 async def test_meter_values_handler(charge_point):
@@ -1095,6 +1117,57 @@ async def test_set_current_limit_no_wallbox(coordinator):
     result = await coordinator.async_set_current_limit(16.0)
 
     assert result is False
+
+
+def _start_schedules(mock_call):
+    return [
+        datetime.strptime(
+            msg.charging_profile.charging_schedule[0].start_schedule,
+            _OCPP_DATETIME_FORMAT,
+        ).replace(tzinfo=UTC)
+        for msg in _set_profile_messages(mock_call)
+    ]
+
+
+async def test_limit_profile_start_is_backdated(coordinator):
+    """A limit profile starts in the past so a lagging wallbox clock applies it now.
+
+    Anchored at the CSMS "now", the Delta (clock ~54 s behind) only applied the
+    new limit once its clock caught up and charged at its install maximum until
+    then - every limit change overshot to 25 A for about a minute.
+    """
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+
+    before = datetime.now(UTC)
+    assert await coordinator.async_set_current_limit(10.0) is True
+
+    (start,) = _start_schedules(mock_cp.call)
+    assert start <= before - PROFILE_START_BACKDATE + timedelta(seconds=1)
+    assert start >= before - PROFILE_START_BACKDATE - timedelta(seconds=5)
+
+
+async def test_pause_profile_start_is_backdated(coordinator):
+    """The 0 A pause profile must take effect at once, not ~1 min later."""
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Accepted"
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-1"
+    coordinator.data["power"] = 7000
+    coordinator.data["charging_state"] = "Charging"
+    coordinator.async_trigger_meter_values = AsyncMock(return_value=True)
+
+    before = datetime.now(UTC)
+    result = await coordinator.async_pause_charging(allow_nuke=False)
+
+    assert result["success"] is True
+    (start,) = _start_schedules(mock_cp.call)
+    assert start <= before - PROFILE_START_BACKDATE + timedelta(seconds=1)
 
 
 async def test_apply_limit_on_transaction_start(coordinator):

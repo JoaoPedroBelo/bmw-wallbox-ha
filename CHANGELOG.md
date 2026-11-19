@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-11-19
+
+### Fixed
+
+- **Every current-limit change no longer overshoots to the wallbox maximum for about a
+  minute.**
+
+  - *Impact:* Lowering, raising or pausing the limit took ~55-60 s to apply, and during
+    that window the wallbox charged at its installation maximum (e.g. 25 A). Asking for
+    6 A gave 23.8 A for a minute; a pause kept charging at full power for a minute. With
+    a load-management automation this pushes the house over its contracted power on every
+    adjustment (measured live: 6.0-7.0 kW on a 6.9 kVA supply).
+  - *Root cause:* The wallbox clock runs ~54 s behind Home Assistant and cannot be
+    corrected over OCPP (`ClockCtrlr` exposes no time-source/NTP variables). Every
+    `SetChargingProfile` carried `startSchedule` = Home Assistant's "now", which is in the
+    wallbox's future, so the new profile only started once its clock caught up. Until
+    then the station fell back to its installation maximum — `GetCompositeSchedule`
+    showed `[{0 s: 25 A}, {41 s: 6 A}]`.
+  - *Fix:* Charging profiles are anchored 10 minutes in the past, so they are active the
+    moment the wallbox accepts them. Measured live: a change now applies in ~15 s with no
+    overshoot.
+  - Heartbeat and BootNotification `currentTime` are now OCPP dateTimes (UTC, `Z`
+    suffix, whole seconds) instead of a naive timestamp with microseconds.
+
+### Known issue
+
+- The intermittent "wallbox rejects every limit change until it is rebooted" lockout
+  (#14, #32) is **not** fixed by this release. It was reproduced live once (after a 0 A
+  pause, on resume) but not on demand; investigation continues.
+
 ## [2.0.0] - 2026-08-29
 
 This is a major release. It replaces the charging-control strategy end to end to fix a
