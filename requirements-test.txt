@@ -3,6 +3,9 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-homeassistant-custom-component>=0.13.0
 pytest-cov>=4.1.0
+# IANA zones incl. legacy links (US/Pacific, used by the HA test fixture);
+# Ubuntu 26.04 runners no longer ship them in the system tzdata
+tzdata>=2024.1
 
 # Home Assistant
 homeassistant>=2024.1.0
