@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true
 
       - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6 # master @ 2026-07-31
+        uses: home-assistant/actions/hassfest@07f46fd2e19967768b5fd3000f91f857452b767c # master @ 2026-07-31
 
   test:
     name: Run Tests
@@ -174,7 +174,7 @@ jobs:
           echo "✅ Created bmw_wallbox.zip"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           body_path: /tmp/release-notes.md
           files: bmw_wallbox.zip
