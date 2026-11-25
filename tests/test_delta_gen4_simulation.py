@@ -359,9 +359,8 @@ async def test_issue14_consecutive_limit_changes_never_poison(sim_setup):
 async def test_issue14_pause_resume_cycle_survives_duplicate_quirk(sim_setup):
     """Pause (0A) then resume must work after limit changes (issue #14 fallout).
 
-    Pre-#18, the duplicate rejection latched after the first re-sent profile,
-    the 0A pause was then rejected too and the integration fell back to the
-    last-resort wallbox reboot ("nuke"). The whole cycle must now complete
+    Pre-#18, the duplicate rejection latched after the first re-sent profile
+    and the 0A pause was then rejected too. The whole cycle must now complete
     without a single rejection.
     """
     sim, coordinator = sim_setup
@@ -371,8 +370,8 @@ async def test_issue14_pause_resume_cycle_survives_duplicate_quirk(sim_setup):
     assert await coordinator.async_set_current_limit(6.0) is True
 
     # Pause: clear + TxProfile(0A) - a duplicate id 999 without the clear
-    # would poison the transaction and trigger the nuke fallback.
-    result = await coordinator.async_pause_charging(allow_nuke=False)
+    # would poison the transaction.
+    result = await coordinator.async_pause_charging()
     assert result["success"] is True
     assert result["action"] == "paused"
     assert sim.drawn_current() == 0.0

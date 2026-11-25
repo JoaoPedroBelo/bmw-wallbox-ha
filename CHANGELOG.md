@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.2] - 2026-11-25
 
 ### Changed
 
@@ -18,8 +18,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     existed for transaction-bound `TxProfile`s the firmware discarded while suspended
     (#19); since 2.0.0 only a `TxDefaultProfile` is used, and it survives the
     suspension, so the re-send was redundant.
-  - This removes the request sent at that moment. It is not yet proven to prevent the
-    lockout, which has not been reproduced on demand.
+  - A reporter's v2.0.1 log (#14) confirmed it: the only rejected profile of the session
+    was exactly this re-send, fired the moment the car resumed on its own timer. Removing
+    it removes that rejection.
+
+- **Start, pause and stop never reboot the wallbox automatically.**
+
+  - *Why:* The previous "NUKE" fallback rebooted the wallbox (`Reset(Immediate)`) when a
+    start or pause command failed. An automatic reboot is a sledgehammer, not a fix: it
+    hides the real failure and fights the user's own recovery automations. Recovery via
+    reboot is now a manual action only — the Reboot button (`async_reset_wallbox`).
+
+### Fixed
+
+- **The wallbox is no longer re-sent a charging profile the instant it reconnects during
+  an active session.**
+
+  - *Impact:* After an OCPP reconnect (e.g. a Home Assistant restart) with a session
+    running, the on-connect profile push was rejected by the Delta Gen 4 firmware — one
+    `Rejected` per reconnect. The wallbox already keeps the profile it accepted before the
+    reconnect, so the push was redundant. It is now skipped whenever a transaction is
+    already active; the cold-start push (no session yet, #15) is unchanged.
+
+- **The current-limit slider no longer keeps a value the wallbox rejected.** It reverts
+  to the limit the car is actually on, so a load-management automation reading the number
+  sees the truth and retries, instead of trusting a limit that never applied.
+
+- **A rejected `TxDefaultProfile` is logged as a rejection with the wallbox's own reason**
+  instead of the false "the per-session profile still applies" message (there is no
+  per-session profile since 2.0.0). The rejection also surfaces `statusInfo`.
 
 ## [2.0.1] - 2026-11-19
 

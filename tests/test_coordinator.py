@@ -519,36 +519,12 @@ async def test_async_pause_charging_already_paused(coordinator):
     assert "already paused" in result["message"].lower()
 
 
-async def test_async_pause_charging_nuke_on_rejection(coordinator):
-    """Test pause triggers NUKE (reboot) when SetChargingProfile is rejected."""
-    mock_charge_point = MagicMock()
+async def test_async_pause_charging_rejected_never_reboots(coordinator):
+    """A rejected pause reports failure and NEVER reboots the wallbox.
 
-    async def mock_call(request):
-        # The 0 A pause SetChargingProfile is rejected; everything else (the
-        # Reset nuke) is accepted. Keyed by message type so it is resilient to
-        # the exact call sequence.
-        mock_resp = MagicMock()
-        if type(request).__name__ == "SetChargingProfile":
-            mock_resp.status = "Rejected"
-            mock_resp.status_info = None
-        else:
-            mock_resp.status = "Accepted"
-        return mock_resp
-
-    mock_charge_point.call = mock_call
-    coordinator.charge_point = mock_charge_point
-    coordinator.current_transaction_id = "test-tx-123"
-    coordinator.data["power"] = 7000.0
-
-    result = await coordinator.async_pause_charging(allow_nuke=True)
-
-    assert result["success"] is True
-    assert result["action"] == "nuked"
-    assert "reboot" in result["message"].lower() or "💣" in result["message"]
-
-
-async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
-    """Test pause does NOT trigger NUKE when allow_nuke=False."""
+    An automatic reboot is a sledgehammer, not a fix: the integration must
+    surface the rejection and leave recovery to the manual Reboot button.
+    """
     mock_charge_point = MagicMock()
 
     reset_calls = []
@@ -569,21 +545,27 @@ async def test_async_pause_charging_no_nuke_when_disabled(coordinator):
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 7000.0
 
-    result = await coordinator.async_pause_charging(allow_nuke=False)
+    result = await coordinator.async_pause_charging()
 
     assert result["success"] is False
+    assert result["action"] == "failed"
     assert "rejected" in result["message"].lower()
-    # Must NOT reboot when allow_nuke=False.
-    assert reset_calls == []
+    assert reset_calls == []  # no automatic reboot
 
 
-async def test_async_pause_charging_nuke_on_timeout(coordinator):
-    """Test pause triggers NUKE when command times out."""
+async def test_async_pause_charging_timeout_never_reboots(coordinator):
+    """A timed-out pause reports failure and NEVER reboots the wallbox."""
     mock_charge_point = MagicMock()
 
+    reset_calls = []
+
     async def mock_call(request):
+        if type(request).__name__ == "Reset":
+            reset_calls.append(request)
+            mock_resp = MagicMock()
+            mock_resp.status = "Accepted"
+            return mock_resp
         if type(request).__name__ == "SetChargingProfile":
-            # The 0 A pause SetChargingProfile times out.
             raise TimeoutError("Connection timed out")
         mock_resp = MagicMock()
         mock_resp.status = "Accepted"
@@ -594,10 +576,11 @@ async def test_async_pause_charging_nuke_on_timeout(coordinator):
     coordinator.current_transaction_id = "test-tx-123"
     coordinator.data["power"] = 7000.0
 
-    result = await coordinator.async_pause_charging(allow_nuke=True)
+    result = await coordinator.async_pause_charging()
 
-    assert result["success"] is True
-    assert result["action"] == "nuked"
+    assert result["success"] is False
+    assert "timed out" in result["message"].lower()
+    assert reset_calls == []  # no automatic reboot
 
 
 async def test_async_resume_charging(coordinator):
@@ -749,7 +732,7 @@ async def test_start_charging_timeout(coordinator):
     coordinator.charge_point = mock_charge_point
     coordinator.current_transaction_id = None
 
-    result = await coordinator.async_start_charging(allow_nuke=False)
+    result = await coordinator.async_start_charging()
 
     assert result["success"] is False
     assert "timed out" in result["message"].lower()
@@ -1093,6 +1076,33 @@ async def test_set_current_limit_sends_tx_default_profile(coordinator):
     assert coordinator.data["current_limit"] == 13.0
 
 
+async def test_rejected_txdefault_logs_real_reason_not_false_claim(coordinator, caplog):
+    """A rejected TxDefaultProfile must report the rejection, not a false claim.
+
+    Before v2.0.0 a rejected TxDefaultProfile was logged as "the per-session
+    profile still applies" - false since only a TxDefaultProfile is sent now.
+    The rejection must surface the wallbox's own reason (issue #14).
+    """
+    mock_cp = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = "Rejected"
+    mock_response.status_info = {
+        "reason_code": "InvalidSchedule",
+        "additional_info": "nope",
+    }
+    mock_cp.call = AsyncMock(return_value=mock_response)
+    coordinator.charge_point = mock_cp
+    coordinator.current_transaction_id = "tx-123"
+
+    with caplog.at_level(logging.WARNING):
+        result = await coordinator.async_set_current_limit(13.0)
+
+    assert result is False
+    assert "still applies" not in caplog.text
+    assert "rejected by wallbox" in caplog.text
+    assert "InvalidSchedule" in caplog.text
+
+
 async def test_set_current_limit_without_transaction_uses_default_only(coordinator):
     """Without an active session the TxDefaultProfile alone still sets the limit."""
     mock_cp = MagicMock()
@@ -1163,7 +1173,7 @@ async def test_pause_profile_start_is_backdated(coordinator):
     coordinator.async_trigger_meter_values = AsyncMock(return_value=True)
 
     before = datetime.now(UTC)
-    result = await coordinator.async_pause_charging(allow_nuke=False)
+    result = await coordinator.async_pause_charging()
 
     assert result["success"] is True
     (start,) = _start_schedules(mock_cp.call)
@@ -1179,6 +1189,40 @@ async def test_apply_limit_on_transaction_start(coordinator):
     await coordinator.async_apply_limit_on_transaction_start()
 
     coordinator.async_set_current_limit.assert_called_once_with(13.0)
+
+
+async def test_apply_default_limit_on_connect_skips_active_transaction(coordinator):
+    """On reconnect with a live session, do NOT re-push the TxDefaultProfile.
+
+    The wallbox keeps the profile it accepted before the OCPP reconnect, and
+    the Delta Gen 4 firmware rejects this post-reconnect re-push mid-session
+    (issue #14). Re-pushing is both redundant and a guaranteed Rejected.
+    """
+    coordinator.charge_point = MagicMock()
+    coordinator.current_transaction_id = "tx-live"
+    coordinator.data["current_limit"] = 10.0
+    sent = AsyncMock(return_value=True)
+    coordinator._send_charging_profile = sent
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        await coordinator._apply_default_limit_on_connect()
+
+    sent.assert_not_called()
+
+
+async def test_apply_default_limit_on_connect_when_idle(coordinator):
+    """With no active session, still pre-install the limit (issue #15)."""
+    coordinator.charge_point = MagicMock()
+    coordinator.current_transaction_id = None
+    coordinator.data["current_limit"] = 10.0
+    sent = AsyncMock(return_value=True)
+    coordinator._send_charging_profile = sent
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        await coordinator._apply_default_limit_on_connect()
+
+    sent.assert_called_once()
+    assert sent.call_args.args[0] == 10.0
 
 
 # ==============================================================================

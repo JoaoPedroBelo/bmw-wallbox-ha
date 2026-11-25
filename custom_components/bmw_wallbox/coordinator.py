@@ -987,16 +987,15 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             await self.server.wait_closed()
             _LOGGER.info("OCPP server stopped")
 
-    async def async_start_charging(
-        self, status_callback=None, allow_nuke: bool = True
-    ) -> dict:
+    async def async_start_charging(self, status_callback=None) -> dict:
         """Start/resume charging using SetChargingProfile(32A).
 
         If there's an existing transaction, uses SetChargingProfile to resume.
         If no transaction, uses RequestStartTransaction to create one.
 
-        NUKE OPTION: If all attempts fail and allow_nuke=True, reboots the wallbox
-        as a last resort (~60 seconds downtime).
+        Never reboots the wallbox on failure: an automatic reboot is a sledge-
+        hammer, not a fix. Recovery via Reset stays a manual action (the Reboot
+        button / async_reset_wallbox).
 
         Returns a dict with:
             - success: bool
@@ -1142,30 +1141,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 )
                 result["action"] = "rejected"
 
-                # 💣 NUKE OPTION: If everything failed and nuke is allowed, reboot wallbox
-                if allow_nuke:
-                    _LOGGER.warning(
-                        "💣 NUKE OPTION: All start methods failed, rebooting wallbox..."
-                    )
-                    if status_callback:
-                        await status_callback(
-                            "💣 NUKE: Rebooting wallbox (last resort)..."
-                        )
-
-                    nuke_result = await self.async_reset_wallbox(status_callback)
-                    if nuke_result["success"]:
-                        result["message"] = (
-                            "💣 Wallbox rebooting (~60s). Charging will auto-start."
-                        )
-                        result["action"] = "nuked"
-                        result["success"] = (
-                            True  # Consider it success since reboot works
-                        )
-                    else:
-                        result["message"] = (
-                            f"All methods failed. Nuke also failed: {nuke_result['message']}"
-                        )
-
             return result
 
         except TimeoutError:
@@ -1174,22 +1149,6 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         except Exception as err:
             result["message"] = f"Error: {err!s}"
             _LOGGER.error("Failed to start charging: %s", err)
-
-        # 💣 NUKE OPTION: If we got here due to exception and nuke is allowed
-        if not result["success"] and allow_nuke:
-            _LOGGER.warning(
-                "💣 NUKE OPTION: Start failed with error, rebooting wallbox..."
-            )
-            if status_callback:
-                await status_callback("💣 NUKE: Rebooting wallbox (last resort)...")
-
-            nuke_result = await self.async_reset_wallbox(status_callback)
-            if nuke_result["success"]:
-                result["message"] = (
-                    "💣 Wallbox rebooting (~60s). Charging will auto-start."
-                )
-                result["action"] = "nuked"
-                result["success"] = True
 
         return result
 
@@ -1308,14 +1267,15 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
 
         return await self.async_start_charging(status_callback)
 
-    async def async_pause_charging(self, allow_nuke: bool = True) -> dict:
+    async def async_pause_charging(self) -> dict:
         """Pause charging via SetChargingProfile(0A) - EVCC-style.
 
         This pauses charging without ending the transaction!
         Much better than RequestStopTransaction which creates stuck states.
 
-        NUKE OPTION: If pause fails and allow_nuke=True, reboots the wallbox
-        as a last resort to stop charging (~60 seconds downtime).
+        Never reboots the wallbox on failure: an automatic reboot is a sledge-
+        hammer, not a fix. Recovery via Reset stays a manual action (the Reboot
+        button / async_reset_wallbox).
         """
         _LOGGER.info("⏸️ PAUSE CHARGING - SetChargingProfile(0A)")
 
@@ -1403,74 +1363,18 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
                 reason = ""
                 if hasattr(response, "status_info") and response.status_info:
                     reason = f" ({response.status_info.get('reason_code', '')})"
-
-                # 💣 NUKE OPTION: If pause rejected and nuke is allowed, reboot wallbox
-                if allow_nuke:
-                    _LOGGER.warning(
-                        "💣 NUKE OPTION: Pause rejected (%s), rebooting wallbox to force stop!",
-                        response.status,
-                    )
-                    nuke_result = await self.async_reset_wallbox()
-                    if nuke_result["success"]:
-                        result["success"] = True
-                        result["message"] = (
-                            "💣 Wallbox rebooting (~60s) to force stop charging"
-                        )
-                        result["action"] = "nuked"
-                    else:
-                        result["message"] = (
-                            f"Pause rejected and reboot failed: {nuke_result['message']}"
-                        )
-                        result["action"] = "nuke_failed"
-                else:
-                    result["message"] = f"Pause rejected: {response.status}{reason}"
+                result["message"] = f"Pause rejected: {response.status}{reason}"
 
             return result
 
         except TimeoutError:
             _LOGGER.error("Pause command timed out!")
-            # 💣 NUKE OPTION: If timeout and nuke is allowed, reboot wallbox
-            if allow_nuke:
-                _LOGGER.warning(
-                    "💣 NUKE OPTION: Pause timed out, rebooting wallbox to force stop!"
-                )
-                nuke_result = await self.async_reset_wallbox()
-                if nuke_result["success"]:
-                    result["success"] = True
-                    result["message"] = (
-                        "💣 Wallbox rebooting (~60s) to force stop charging"
-                    )
-                    result["action"] = "nuked"
-                else:
-                    result["message"] = (
-                        f"Pause timed out and reboot failed: {nuke_result['message']}"
-                    )
-                    result["action"] = "nuke_failed"
-            else:
-                result["message"] = "Command timed out"
+            result["message"] = "Command timed out"
             return result
 
         except Exception as err:
             _LOGGER.error("Failed to pause: %s", err)
-            # 💣 NUKE OPTION: If exception and nuke is allowed, reboot wallbox
-            if allow_nuke:
-                _LOGGER.warning(
-                    "💣 NUKE OPTION: Pause failed with error, rebooting wallbox to force stop!"
-                )
-                nuke_result = await self.async_reset_wallbox()
-                if nuke_result["success"]:
-                    result["success"] = True
-                    result["message"] = (
-                        "💣 Wallbox rebooting (~60s) to force stop charging"
-                    )
-                    result["action"] = "nuked"
-                else:
-                    result["message"] = (
-                        f"Pause error and reboot failed: {nuke_result['message']}"
-                    )
-                    result["action"] = "nuke_failed"
-            else:
-                result["message"] = f"Error: {err!s}"
+            result["message"] = f"Error: {err!s}"
             return result
 
     async def async_resume_charging(self, current_limit: float | None = None) -> dict:
@@ -1545,23 +1449,22 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to resume: %s", err)
             return result
 
-    async def async_stop_charging(self, allow_nuke: bool = True) -> dict:
+    async def async_stop_charging(self) -> dict:
         """Stop/pause charging using SetChargingProfile(0A).
 
         This pauses charging WITHOUT ending the transaction, so we can resume later.
         Much better than RequestStopTransaction which puts the charger in Finishing
         state and prevents restart.
 
-        NUKE OPTION: If pause fails and allow_nuke=True, reboots the wallbox
-        as a last resort to stop charging (~60 seconds downtime).
+        Never reboots the wallbox on failure (see async_pause_charging).
 
         Returns a dict with:
             - success: bool
             - message: str (user-friendly message)
-            - action: str (what was done: paused, nuked, etc.)
+            - action: str (what was done: paused, etc.)
         """
         _LOGGER.info("⏹️ STOP CHARGING - SetChargingProfile(0A)")
-        return await self.async_pause_charging(allow_nuke=allow_nuke)
+        return await self.async_pause_charging()
 
     async def _send_charging_profile(
         self,
@@ -1617,21 +1520,12 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         accepted = status_str == "Accepted" or "accepted" in status_str.lower()
         if accepted:
             _LOGGER.info("✅ %s set to %sA - accepted by wallbox", purpose, limit)
-        elif purpose == ChargingProfilePurposeEnumType.tx_default_profile:
-            # Some firmware (BMW/Delta Gen 4) doesn't accept a persistent
-            # TxDefaultProfile but honours the per-session TxProfile we send
-            # alongside it, so the limit still applies. Keep this informational
-            # rather than a scary warning (issue #14).
-            _LOGGER.info(
-                "%s (%sA) not accepted by wallbox: %s - the per-session profile "
-                "still applies the limit",
-                purpose,
-                limit,
-                response.status,
-            )
         else:
             # Surface the wallbox's own reason for the rejection - essential to
-            # debug firmware-specific refusals (issue #14).
+            # debug firmware-specific refusals (issue #14). Since v2.0.0 only a
+            # TxDefaultProfile is sent (no per-session TxProfile), so a rejected
+            # TxDefaultProfile means the limit did NOT take effect - never claim
+            # "the per-session profile still applies".
             reason = ""
             status_info = getattr(response, "status_info", None)
             if status_info:
@@ -1760,6 +1654,23 @@ class BMWWallboxCoordinator(DataUpdateCoordinator):
         await asyncio.sleep(5)
         if not self.charge_point:
             return
+        # If a session is already running, the wallbox still holds the
+        # TxDefaultProfile it accepted before this OCPP reconnect (it survives
+        # the reconnect), so re-pushing it here is redundant - and the Delta
+        # Gen 4 firmware rejects this post-reconnect re-push mid-session
+        # (issue #14): one benign Rejected per reconnect. _recover_transaction_
+        # on_connect runs in parallel and only sets current_transaction_id once
+        # the wallbox re-reports the transaction, so poll briefly before
+        # deciding the connection is genuinely idle.
+        for _ in range(10):
+            if self.current_transaction_id:
+                _LOGGER.debug(
+                    "Skipping on-connect TxDefaultProfile: transaction %s "
+                    "already active, its limit still applies",
+                    self.current_transaction_id,
+                )
+                return
+            await asyncio.sleep(0.5)
         limit = self.data.get("current_limit")
         if not limit:
             return
