@@ -100,9 +100,7 @@ await coordinator.async_stop_server()
 **Location:** `coordinator.py:616-805`
 
 ```python
-async def async_start_charging(
-    self, status_callback=None, allow_nuke: bool = True
-) -> dict:
+async def async_start_charging(self, status_callback=None) -> dict:
     """Start/resume charging using SetChargingProfile(32A)."""
 ```
 
@@ -110,14 +108,17 @@ async def async_start_charging(
 
 **Parameters:**
 - `status_callback` - Optional async callback for progress updates
-- `allow_nuke` - If True (default), will reboot wallbox as last resort if all else fails
+
+**Never reboots automatically.** An automatic reboot is a sledgehammer, not a
+fix: on failure this method reports the failure and leaves recovery to the
+manual Reboot button (`async_reset_wallbox`).
 
 **Returns:**
 ```python
 {
     "success": bool,  # True if charging started/resumed
     "message": str,  # User-friendly message
-    "action": str,  # "started", "resumed", "already_charging", "rejected", "nuked", "failed"
+    "action": str,  # "started", "resumed", "already_charging", "rejected", "failed"
 }
 ```
 
@@ -137,10 +138,7 @@ flowchart TD
     TryStart[Try RequestStartTransaction<br/>+ SetChargingProfile 32A]
     StartOK{Start<br/>succeeded?}
     SuccessStart[Return 'started']
-    CheckNuke{allow_nuke<br/>= True?}
-    Nuke["💣 NUKE: Reset(Immediate)<br/>Wallbox reboots ~60s"]
-    SuccessNuke[Return 'nuked']
-    FailAll[Return 'failed']
+    FailAll[Return 'failed'/'rejected']
     
     Start --> CheckConn
     CheckConn -->|NO| FailNotConn
@@ -154,33 +152,23 @@ flowchart TD
     ResumeOK -->|NO| TryStart
     TryStart --> StartOK
     StartOK -->|YES| SuccessStart
-    StartOK -->|NO| CheckNuke
-    CheckNuke -->|YES| Nuke
-    CheckNuke -->|NO| FailAll
-    Nuke --> SuccessNuke
+    StartOK -->|NO| FailAll
 ```
 
 **Example:**
 ```python
-# Normal start (with NUKE fallback)
 result = await coordinator.async_start_charging()
 
-# Start without NUKE fallback (won't reboot if all fails)
-result = await coordinator.async_start_charging(allow_nuke=False)
-
 if result["success"]:
-    if result["action"] == "nuked":
-        print("Wallbox rebooting, charging will auto-start in ~60s")
-    else:
-        print(f"Charging started: {result['action']}")
+    print(f"Charging started: {result['action']}")
 else:
     print(f"Failed: {result['message']}")
 ```
 
-**💣 NUKE Option:**
-The NUKE is a last resort when all start methods fail. It reboots the wallbox,
-which clears any stuck states. After reboot (~60 seconds), charging auto-starts
-if the cable is plugged in. Use with caution!
+**No automatic reboot:** earlier versions rebooted the wallbox ("NUKE") when
+every start method failed. That was removed - an automatic reboot is a
+sledgehammer, not a fix. Recovery via `Reset(Immediate)` is now a manual action
+only (the Reboot button / `async_reset_wallbox`).
 
 ---
 
@@ -589,36 +577,17 @@ EVCC-style flow:
 | Press Start (paused) | `async_start_charging()` | `SetChargingProfile(user_limit)` |
 | Press Stop | `async_stop_charging()` | `SetChargingProfile(0A)` |
 | Adjust Current | `async_set_current_limit()` | `SetChargingProfile(XA)` + updates `current_limit` |
-| Start failed (NUKE) | `async_start_charging()` | `Reset(Immediate)` |
+| Manual reboot | `async_reset_wallbox()` (Reboot button) | `Reset(Immediate)` |
 
 **Note:** `user_limit` is the value from the "Charging Current Limit" slider (`coordinator.data["current_limit"]`), which defaults to `max_current` from config.
 
-### The NUKE Option
+### Recovery via reboot is manual only
 
-If all start methods fail, the integration can automatically reboot the wallbox as a last resort:
-
-```mermaid
-flowchart TD
-    Start["START pressed"]
-    Try1["Try SetChargingProfile(32A)<br/>to resume"]
-    Fail1{Failed?}
-    Try2["Try RequestStartTransaction<br/>+ SetChargingProfile(32A)"]
-    Fail2{Failed?}
-    Nuke["💣 NUKE: Reset(Immediate)<br/>Wallbox reboots ~60 seconds"]
-    Success["Charging auto-starts<br/>after reboot"]
-    Done["Charging started"]
-    
-    Start --> Try1
-    Try1 --> Fail1
-    Fail1 -->|NO| Done
-    Fail1 -->|YES| Try2
-    Try2 --> Fail2
-    Fail2 -->|NO| Done
-    Fail2 -->|YES| Nuke
-    Nuke --> Success
-```
-
-The NUKE is enabled by default but can be disabled with `allow_nuke=False`.
+Earlier versions rebooted the wallbox automatically ("NUKE") when every start or
+pause method failed. That was removed: an automatic reboot is a sledgehammer, not
+a fix, and it fought the user's own recovery automations. `start`/`pause`/`stop`
+now report the failure and stop there. `Reset(Immediate)` is reached only through
+the manual Reboot button (`async_reset_wallbox`).
 
 ---
 

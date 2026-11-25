@@ -98,9 +98,13 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
         """Set new current limit.
 
         Updates the tracked value immediately for UI responsiveness.
-        If there's an active charging session, also sends the command to the wallbox.
+        If there's an active charging session, also sends the command to the
+        wallbox and reverts the slider if the wallbox rejects it, so the value
+        never claims a limit the car is not actually on (a load balancer reads
+        this number and would otherwise trust a rejected limit and never retry).
         """
         int_value = int(value)
+        previous_value = self.coordinator.data.get("current_limit")
 
         # Update tracked value immediately (for UI responsiveness)
         self.coordinator.data["current_limit"] = int_value
@@ -110,8 +114,14 @@ class BMWWallboxCurrentLimitNumber(CoordinatorEntity, NumberEntity):
         if self.coordinator.current_transaction_id:
             success = await self.coordinator.async_set_current_limit(int_value)
             if not success:
+                # The wallbox rejected it: revert so the slider reflects the
+                # limit the car is actually on, not the one we wanted.
+                self.coordinator.data["current_limit"] = previous_value
+                self.coordinator.async_set_updated_data(self.coordinator.data)
                 _LOGGER.warning(
-                    "Failed to send current limit to wallbox (will apply on next start)"
+                    "Wallbox rejected current limit %sA; reverted to %sA",
+                    int_value,
+                    previous_value,
                 )
 
 

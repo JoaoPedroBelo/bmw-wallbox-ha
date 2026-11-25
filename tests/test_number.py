@@ -110,10 +110,16 @@ async def test_current_limit_unique_id(
     assert number.unique_id == "test_entry_id_current_limit"
 
 
-async def test_current_limit_handles_failed_command(
+async def test_current_limit_reverts_when_wallbox_rejects(
     hass: HomeAssistant, mock_coordinator, mock_config_entry
 ) -> None:
-    """Test current limit handles failed wallbox command gracefully."""
+    """A rejected limit must revert, so the slider never claims a wrong value.
+
+    A load balancer reads this number; if it kept the rejected value it would
+    trust a limit the car is not on and never retry.
+    """
+    mock_coordinator.current_transaction_id = "tx-1"
+    mock_coordinator.data["current_limit"] = 16
     # Make the command fail
     mock_coordinator.async_set_current_limit = AsyncMock(return_value=False)
 
@@ -122,6 +128,23 @@ async def test_current_limit_handles_failed_command(
     # Set new value - should not raise even if command fails
     await number.async_set_native_value(24.0)
 
-    # Should still update coordinator.data (for next start/resume)
-    assert mock_coordinator.data["current_limit"] == 24
     mock_coordinator.async_set_current_limit.assert_called_once_with(24)
+    # Reverted to the limit the car is actually on.
+    assert mock_coordinator.data["current_limit"] == 16
+
+
+async def test_current_limit_no_transaction_tracks_without_send(
+    hass: HomeAssistant, mock_coordinator, mock_config_entry
+) -> None:
+    """With no active session the value is tracked for the next start, no send."""
+    mock_coordinator.current_transaction_id = None
+    mock_coordinator.data["current_limit"] = 16
+    mock_coordinator.async_set_current_limit = AsyncMock(return_value=False)
+
+    number = BMWWallboxCurrentLimitNumber(mock_coordinator, mock_config_entry)
+
+    await number.async_set_native_value(24.0)
+
+    # No active transaction -> nothing sent, value kept for the next start.
+    mock_coordinator.async_set_current_limit.assert_not_called()
+    assert mock_coordinator.data["current_limit"] == 24

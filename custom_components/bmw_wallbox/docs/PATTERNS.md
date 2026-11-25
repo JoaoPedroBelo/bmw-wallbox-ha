@@ -20,11 +20,9 @@ flowchart TD
     
     TryStart["Use RequestStartTransaction +<br/>SetChargingProfile(32A)<br/>Creates new transaction"]
     
-    CheckAllFail{ALL FAIL?<br/>& nuke allowed?}
+    CheckAllFail{ALL FAIL?}
     
-    Nuke["💣 NUKE<br/>Reboot wallbox<br/>~60s"]
-    
-    Fail["❌ FAIL"]
+    Fail["❌ FAIL<br/>report, no reboot"]
     
     Start --> CheckConn
     CheckConn -->|NO| FailNotConn
@@ -35,14 +33,15 @@ flowchart TD
     CheckTx -->|NO| TryStart
     TryResume --> TryStart
     TryStart --> CheckAllFail
-    CheckAllFail -->|YES| Nuke
-    CheckAllFail -->|NO| Fail
+    CheckAllFail -->|YES| Fail
 ```
 
-**Implementation:** `coordinator.py:async_start_charging()` (lines 616-805)
+**Implementation:** `coordinator.py:async_start_charging()`
 
-**💣 NUKE Option:** If all start methods fail and `allow_nuke=True` (default), the wallbox
-is rebooted as a last resort. Charging auto-starts after reboot (~60 seconds).
+**No automatic reboot:** if all start methods fail, the method reports the
+failure and stops. It never reboots the wallbox - an automatic reboot is a
+sledgehammer, not a fix. Recovery via reboot is a manual action only (the Reboot
+button / `async_reset_wallbox`).
 
 ---
 
@@ -330,7 +329,7 @@ an IdTag**. This is defined by the OCPP standard and affects all compliant charg
 
 The only recovery options are:
 1. Unplug and replug the cable
-2. Reboot the wallbox (💣 NUKE option)
+2. Reboot the wallbox (manual Reboot button)
 
 Source: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-starting-charging-via-ocpp-fails/13750/2)
 
@@ -482,7 +481,7 @@ flowchart LR
         R6["6️⃣ Never block in<br/>async methods"]
         R7["7️⃣ Include device_info<br/>on all entities"]
         R8["8️⃣ Use constants<br/>from const.py"]
-        R9["9️⃣ 💣 NUKE is<br/>last resort"]
+        R9["9️⃣ Never reboot<br/>automatically on failure"]
     end
 ```
 
@@ -494,4 +493,4 @@ flowchart LR
 6. **Never block in async methods** - use `await asyncio.sleep()` not `time.sleep()`
 7. **Always include `device_info`** - required for HA device grouping
 8. **Always use constants from `const.py`** - no magic strings
-9. **💣 NUKE is the last resort** - if all start methods fail, wallbox reboot works but takes ~60s
+9. **Never reboot automatically on failure** - start/pause/stop report the failure and stop; `Reset(Immediate)` is a manual action only (the Reboot button)

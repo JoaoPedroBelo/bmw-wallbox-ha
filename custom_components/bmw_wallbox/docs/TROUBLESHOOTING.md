@@ -293,14 +293,14 @@ flowchart TD
     WasStop -->|YES| OCPP["OCPP 'Finishing' state!<br/>Cannot restart with IdTag"]
     OCPP --> Recovery{Recovery<br/>Options}
     Recovery --> Opt1["Option 1: Unplug/replug cable"]
-    Recovery --> Opt2["Option 2: 💣 NUKE - Reboot wallbox"]
+    Recovery --> Opt2["Option 2: Manual Reboot button"]
     Recovery --> Opt3["Option 3: Wait for auto-start"]
     
     WasStop -->|NO| CheckConn{Wallbox<br/>connected?}
     CheckConn -->|NO| WaitConn["Wait for<br/>wallbox connection"]
     CheckConn -->|YES| CheckCable{Cable<br/>plugged in?}
     CheckCable -->|NO| PlugCable["Plug in<br/>charging cable"]
-    CheckCable -->|YES| TryNuke["Try 💣 NUKE option<br/>in async_start_charging()"]
+    CheckCable -->|YES| ManualReboot["Press the Reboot button<br/>(async_reset_wallbox)"]
 ```
 
 **Root Cause: OCPP "Finishing" State**
@@ -316,13 +316,11 @@ Source: [Teltonika Community Discussion](https://community.teltonika.lt/t/re-sta
    - Transaction stays active, avoids Finishing state
    - Resume with `SetChargingProfile(32A)`
    
-2. **💣 NUKE Option (Automatic)**
-   - If all start methods fail, the integration automatically reboots the wallbox
-   - Takes ~60 seconds, charging auto-starts after reboot
-   - Enabled by default, can be disabled with `allow_nuke=False`
-   - Look for `💣 NUKE OPTION` in logs
-
-3. **Manual Recovery: Reset wallbox**
+2. **Manual Recovery: Reboot the wallbox**
+   - Start/pause/stop never reboot automatically - an automatic reboot is a
+     sledgehammer, not a fix, and it fights the user's own recovery automations.
+   - Press the Reboot button (or call `async_reset_wallbox()`); takes ~60 s and
+     charging auto-starts after the reboot if the cable is plugged in.
    ```python
    await coordinator.async_reset_wallbox()
    # Wait ~60 seconds for reboot
